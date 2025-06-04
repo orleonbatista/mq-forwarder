@@ -36,9 +36,6 @@ func main() {
 		Environment:    os.Getenv("ENV"),
 		OTLPEndpoint:   os.Getenv("OTLP_ENDPOINT"),
 	}
-	if otelConfig.OTLPEndpoint == "" {
-		otelConfig.OTLPEndpoint = "localhost:4317"
-	}
 	if otelConfig.Environment == "" {
 		otelConfig.Environment = "development"
 	}
