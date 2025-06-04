@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 // MQMetrics contém os medidores para métricas relacionadas à transferência MQ
@@ -39,6 +39,13 @@ var (
 
 // InitOTel inicializa o OpenTelemetry SDK
 func InitOTel(config OTelConfig) (*MQMetrics, error) {
+	if config.OTLPEndpoint == "" {
+		log.Println("OTLP endpoint não configurado; telemetria desativada")
+		mp = nil
+		metrics = nil
+		return nil, nil
+	}
+
 	res, err := resource.Merge(
 		resource.Default(),
 		resource.NewWithAttributes(
