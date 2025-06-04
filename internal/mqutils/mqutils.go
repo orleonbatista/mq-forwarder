@@ -1,3 +1,5 @@
+//go:build ibmmq
+
 package mqutils
 
 import (

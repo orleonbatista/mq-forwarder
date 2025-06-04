@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/aggregation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
@@ -78,7 +77,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 					Kind: sdkmetric.InstrumentKindHistogram,
 				},
 				sdkmetric.Stream{
-					Aggregation: aggregation.ExplicitBucketHistogram{
+					Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
 						Boundaries: []float64{
 							1, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
 						},
