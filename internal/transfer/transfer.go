@@ -1,10 +1,12 @@
 package transfer
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"mq-transfer-go/internal/mqutils"
+	"mq-transfer-go/internal/otelutils"
 )
 
 // TransferOptions defines parameters for a transfer operation.
@@ -34,34 +36,128 @@ type TransferManager struct {
 	mu    sync.RWMutex
 	stats Stats
 	quit  chan struct{}
+	done  chan struct{}
 }
 
 // NewTransferManager creates a new manager with the given options.
 func NewTransferManager(opts TransferOptions) *TransferManager {
-	return &TransferManager{opts: opts, stats: Stats{Status: "pending"}, quit: make(chan struct{})}
+	return &TransferManager{opts: opts, stats: Stats{Status: "pending"}, quit: make(chan struct{}), done: make(chan struct{})}
 }
 
-// Start begins the transfer asynchronously. This stub just marks the transfer
-// as completed after a short delay.
+// Start begins the transfer asynchronously.
 func (tm *TransferManager) Start() {
-	go func() {
-		tm.mu.Lock()
-		tm.stats.Status = "in_progress"
-		tm.mu.Unlock()
+	go tm.run()
+}
 
+func (tm *TransferManager) run() {
+	tm.mu.Lock()
+	tm.stats.Status = "in_progress"
+	tm.mu.Unlock()
+
+	metrics := otelutils.GetMetrics()
+	ctx := context.Background()
+
+	srcConn := mqutils.NewMQConnection(tm.opts.SourceConfig)
+	if err := srcConn.Connect(); err != nil {
+		tm.finishWithError("failed", err)
+		return
+	}
+	defer srcConn.Disconnect()
+
+	destConn := mqutils.NewMQConnection(tm.opts.DestConfig)
+	if err := destConn.Connect(); err != nil {
+		tm.finishWithError("failed", err)
+		return
+	}
+	defer destConn.Disconnect()
+
+	srcQ, err := srcConn.OpenQueue(tm.opts.SourceQueue, true, tm.opts.NonSharedConnection)
+	if err != nil {
+		tm.finishWithError("failed", err)
+		return
+	}
+	defer srcConn.CloseQueue(srcQ)
+
+	destQ, err := destConn.OpenQueue(tm.opts.DestQueue, false, false)
+	if err != nil {
+		tm.finishWithError("failed", err)
+		return
+	}
+	defer destConn.CloseQueue(destQ)
+
+	commitCounter := 0
+	for {
 		select {
-		case <-time.After(100 * time.Millisecond):
-			tm.mu.Lock()
-			tm.stats.Status = "completed"
-			tm.stats.EndTime = time.Now()
-			tm.mu.Unlock()
 		case <-tm.quit:
 			tm.mu.Lock()
 			tm.stats.Status = "cancelled"
 			tm.stats.EndTime = time.Now()
 			tm.mu.Unlock()
+			tm.done <- struct{}{}
+			return
+		default:
+			start := time.Now()
+			data, md, err := srcConn.GetMessage(srcQ, tm.opts.BufferSize, tm.opts.CommitInterval)
+			if err != nil {
+				tm.finishWithError("failed", err)
+				tm.done <- struct{}{}
+				return
+			}
+			if data == nil {
+				tm.mu.Lock()
+				tm.stats.Status = "completed"
+				tm.stats.EndTime = time.Now()
+				tm.mu.Unlock()
+				tm.done <- struct{}{}
+				return
+			}
+
+			if err := destConn.PutMessage(destQ, data, md, tm.opts.CommitInterval); err != nil {
+				tm.finishWithError("failed", err)
+				tm.done <- struct{}{}
+				return
+			}
+
+			tm.mu.Lock()
+			tm.stats.MessagesTransferred++
+			tm.stats.BytesTransferred += int64(len(data))
+			tm.mu.Unlock()
+
+			if metrics != nil {
+				metrics.MessagesTransferred.Add(ctx, 1)
+				metrics.BytesTransferred.Add(ctx, int64(len(data)))
+				metrics.TransferDuration.Record(ctx, float64(time.Since(start).Milliseconds()))
+			}
+
+			if tm.opts.CommitInterval > 0 {
+				commitCounter++
+				if commitCounter >= tm.opts.CommitInterval {
+					if err := srcConn.Commit(); err != nil {
+						tm.finishWithError("failed", err)
+						tm.done <- struct{}{}
+						return
+					}
+					if err := destConn.Commit(); err != nil {
+						tm.finishWithError("failed", err)
+						tm.done <- struct{}{}
+						return
+					}
+					commitCounter = 0
+					if metrics != nil {
+						metrics.CommitCounter.Add(ctx, 1)
+					}
+				}
+			}
 		}
-	}()
+	}
+}
+
+func (tm *TransferManager) finishWithError(status string, err error) {
+	tm.mu.Lock()
+	tm.stats.Status = status
+	tm.stats.Error = err.Error()
+	tm.stats.EndTime = time.Now()
+	tm.mu.Unlock()
 }
 
 // Stop cancels the transfer.
