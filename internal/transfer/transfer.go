@@ -1,177 +1,213 @@
-package transfer
+package handlers
 
 import (
-	"context"
+	"net/http"
 	"sync"
 	"time"
 
+	"mq-transfer-go/api/models"
 	"mq-transfer-go/internal/mqutils"
-	"mq-transfer-go/internal/otelutils"
+	"mq-transfer-go/internal/transfer"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-// TransferOptions defines parameters for a transfer operation.
-type TransferOptions struct {
-	SourceConfig        mqutils.MQConnectionConfig
-	SourceQueue         string
-	DestConfig          mqutils.MQConnectionConfig
-	DestQueue           string
-	BufferSize          int
-	CommitInterval      int
-	NonSharedConnection bool
-}
+var (
+	transferStatuses = make(map[string]models.TransferStatus)
+	transferManagers = make(map[string]*transfer.TransferManager)
+	statusMutex      = &sync.RWMutex{}
+)
 
-// Stats holds runtime statistics of a transfer.
-type Stats struct {
-	MessagesTransferred int64
-	BytesTransferred    int64
-	Status              string
-	EndTime             time.Time
-	Error               string
-}
-
-// TransferManager performs message transfer. This is a minimal stub
-// implementation to allow the application to compile and run tests.
-type TransferManager struct {
-	opts  TransferOptions
-	mu    sync.RWMutex
-	stats Stats
-	quit  chan struct{}
-	done  chan struct{}
-}
-
-// NewTransferManager creates a new manager with the given options.
-func NewTransferManager(opts TransferOptions) *TransferManager {
-	return &TransferManager{opts: opts, stats: Stats{Status: "pending"}, quit: make(chan struct{}), done: make(chan struct{})}
-}
-
-// Start begins the transfer asynchronously.
-func (tm *TransferManager) Start() {
-	go tm.run()
-}
-
-func (tm *TransferManager) run() {
-	tm.mu.Lock()
-	tm.stats.Status = "in_progress"
-	tm.mu.Unlock()
-	defer close(tm.done)
-
-	metrics := otelutils.GetMetrics()
-	ctx := context.Background()
-
-	srcConn := mqutils.NewMQConnection(tm.opts.SourceConfig)
-	if err := srcConn.Connect(); err != nil {
-		tm.finishWithError("failed", err)
+// @Summary Iniciar transferência de mensagens MQ
+// @Description Inicia uma transferência de mensagens de uma fila MQ para outra
+// @Tags transfer
+// @Accept json
+// @Produce json
+// @Param request body models.TransferRequest true "Detalhes da transferência"
+// @Success 202 {object} models.TransferResponse "Transferência iniciada"
+// @Failure 400 {object} models.TransferResponse "Erro na requisição"
+// @Failure 500 {object} models.TransferResponse "Erro interno"
+// @Router /api/v1/transfer [post]
+func StartTransfer(c *gin.Context) {
+	var request models.TransferRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.TransferResponse{
+			Status: "failed",
+			Error:  "Erro ao processar requisição: " + err.Error(),
+		})
 		return
 	}
-	defer srcConn.Disconnect()
 
-	destConn := mqutils.NewMQConnection(tm.opts.DestConfig)
-	if err := destConn.Connect(); err != nil {
-		tm.finishWithError("failed", err)
-		return
+	requestID := uuid.New().String()
+
+	if request.BufferSize <= 0 {
+		request.BufferSize = 1048576
 	}
-	defer destConn.Disconnect()
 
-	srcQ, err := srcConn.OpenQueue(tm.opts.SourceQueue, true, tm.opts.NonSharedConnection)
-	if err != nil {
-		tm.finishWithError("failed", err)
-		return
+	options := transfer.TransferOptions{
+		SourceConfig: mqutils.MQConnectionConfig{
+			QueueManagerName:    request.Source.QueueManagerName,
+			ConnectionName:      request.Source.ConnectionName,
+			Channel:             request.Source.Channel,
+			Username:            request.Source.Username,
+			Password:            request.Source.Password,
+			NonSharedConnection: request.NonSharedConnection,
+		},
+		SourceQueue: request.SourceQueue,
+		DestConfig: mqutils.MQConnectionConfig{
+			QueueManagerName: request.Destination.QueueManagerName,
+			ConnectionName:   request.Destination.ConnectionName,
+			Channel:          request.Destination.Channel,
+			Username:         request.Destination.Username,
+			Password:         request.Destination.Password,
+		},
+		DestQueue:           request.DestinationQueue,
+		BufferSize:          request.BufferSize,
+		CommitInterval:      request.CommitInterval,
+		NonSharedConnection: request.NonSharedConnection,
 	}
-	defer srcConn.CloseQueue(srcQ)
 
-	destQ, err := destConn.OpenQueue(tm.opts.DestQueue, false, false)
-	if err != nil {
-		tm.finishWithError("failed", err)
-		return
+	transferMgr := transfer.NewTransferManager(options)
+	transferMgr.Start()
+
+	status := models.TransferStatus{
+		RequestID:           requestID,
+		Status:              "in_progress",
+		StartTime:           time.Now().UTC().Format(time.RFC3339),
+		MessagesTransferred: 0,
 	}
-	defer destConn.CloseQueue(destQ)
 
-	commitCounter := 0
+	statusMutex.Lock()
+	transferStatuses[requestID] = status
+	transferManagers[requestID] = transferMgr
+	statusMutex.Unlock()
+
+	go monitorTransfer(requestID, transferMgr)
+
+	c.JSON(http.StatusAccepted, models.TransferResponse{
+		RequestID: requestID,
+		Status:    "in_progress",
+	})
+}
+
+func monitorTransfer(requestID string, transferMgr *transfer.TransferManager) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
-		select {
-		case <-tm.quit:
-			tm.mu.Lock()
-			tm.stats.Status = "cancelled"
-			tm.stats.EndTime = time.Now()
-			tm.mu.Unlock()
+		<-ticker.C
+
+		stats := transferMgr.GetStats()
+
+		statusMutex.Lock()
+		status := transferStatuses[requestID]
+		status.MessagesTransferred = int(stats.MessagesTransferred)
+		status.BytesTransferred = stats.BytesTransferred
+		status.Status = stats.Status
+
+		if stats.Status == "completed" || stats.Status == "failed" {
+			status.EndTime = stats.EndTime.UTC().Format(time.RFC3339)
+			status.Error = stats.Error
+			transferStatuses[requestID] = status
+			delete(transferManagers, requestID)
+			statusMutex.Unlock()
 			return
-		default:
-			start := time.Now()
-			data, md, err := srcConn.GetMessage(srcQ, tm.opts.BufferSize, tm.opts.CommitInterval)
-			if err != nil {
-				tm.finishWithError("failed", err)
-				return
-			}
-			if data == nil {
-				tm.mu.Lock()
-				tm.stats.Status = "completed"
-				tm.stats.EndTime = time.Now()
-				tm.mu.Unlock()
-				return
-			}
-
-			if err := destConn.PutMessage(destQ, srcQ, data, md, tm.opts.CommitInterval); err != nil {
-				if tm.opts.CommitInterval > 0 {
-					// rollback the GET on error to avoid message loss
-					_ = srcConn.Backout()
-					_ = destConn.Backout()
-				}
-				tm.finishWithError("failed", err)
-				return
-			}
-
-			tm.mu.Lock()
-			tm.stats.MessagesTransferred++
-			tm.stats.BytesTransferred += int64(len(data))
-			tm.mu.Unlock()
-
-			if metrics != nil {
-				metrics.MessagesTransferred.Add(ctx, 1)
-				metrics.BytesTransferred.Add(ctx, int64(len(data)))
-				metrics.TransferDuration.Record(ctx, float64(time.Since(start).Milliseconds()))
-			}
-
-			if tm.opts.CommitInterval > 0 {
-				commitCounter++
-				if commitCounter >= tm.opts.CommitInterval {
-					// commit destination first so source is not lost on failure
-					if err := destConn.Commit(); err != nil {
-						if backErr := srcConn.Backout(); backErr != nil {
-							_ = backErr
-						}
-						tm.finishWithError("failed", err)
-						return
-					}
-					if err := srcConn.Commit(); err != nil {
-						tm.finishWithError("failed", err)
-						return
-					}
-					commitCounter = 0
-					if metrics != nil {
-						metrics.CommitCounter.Add(ctx, 1)
-					}
-				}
-			}
 		}
+
+		transferStatuses[requestID] = status
+		statusMutex.Unlock()
 	}
 }
 
-func (tm *TransferManager) finishWithError(status string, err error) {
-	tm.mu.Lock()
-	tm.stats.Status = status
-	tm.stats.Error = err.Error()
-	tm.stats.EndTime = time.Now()
-	tm.mu.Unlock()
+// @Summary Obter status da transferência
+// @Description Retorna o status atual de uma transferência de mensagens
+// @Tags transfer
+// @Produce json
+// @Param requestId path string true "ID da requisição de transferência"
+// @Success 200 {object} models.TransferStatus "Status da transferência"
+// @Failure 404 {object} models.TransferResponse "Transferência não encontrada"
+// @Router /api/v1/transfer/{requestId} [get]
+func GetTransferStatus(c *gin.Context) {
+	requestID := c.Param("requestId")
+
+	statusMutex.RLock()
+	status, exists := transferStatuses[requestID]
+	statusMutex.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, models.TransferResponse{
+			Status: "failed",
+			Error:  "Transferência não encontrada",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
 }
 
-// Stop cancels the transfer.
-func (tm *TransferManager) Stop() {
-	close(tm.quit)
+// @Summary Listar todas as transferências
+// @Description Retorna uma lista com todas as transferências e seus status
+// @Tags transfer
+// @Produce json
+// @Success 200 {array} models.TransferStatus "Lista de transferências"
+// @Router /api/v1/transfers [get]
+func ListTransfers(c *gin.Context) {
+	statusMutex.RLock()
+	defer statusMutex.RUnlock()
+
+	transfers := make([]models.TransferStatus, 0, len(transferStatuses))
+	for _, status := range transferStatuses {
+		transfers = append(transfers, status)
+	}
+
+	c.JSON(http.StatusOK, transfers)
 }
 
-// GetStats returns a snapshot of the current stats.
-func (tm *TransferManager) GetStats() Stats {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-	return tm.stats
+// @Summary Cancelar uma transferência em andamento
+// @Description Cancela uma transferência de mensagens que está em andamento
+// @Tags transfer
+// @Produce json
+// @Param requestId path string true "ID da requisição de transferência"
+// @Success 200 {object} models.TransferResponse "Transferência cancelada"
+// @Failure 404 {object} models.TransferResponse "Transferência não encontrada"
+// @Failure 400 {object} models.TransferResponse "Transferência já concluída"
+// @Router /api/v1/transfer/{requestId}/cancel [post]
+func CancelTransfer(c *gin.Context) {
+	requestID := c.Param("requestId")
+
+	statusMutex.Lock()
+	defer statusMutex.Unlock()
+
+	status, exists := transferStatuses[requestID]
+	if !exists {
+		c.JSON(http.StatusNotFound, models.TransferResponse{
+			Status: "failed",
+			Error:  "Transferência não encontrada",
+		})
+		return
+	}
+
+	if status.Status != "in_progress" {
+		c.JSON(http.StatusBadRequest, models.TransferResponse{
+			Status:    "failed",
+			Error:     "Transferência já concluída ou falhou",
+			RequestID: requestID,
+		})
+		return
+	}
+
+	transferMgr, exists := transferManagers[requestID]
+	if exists {
+		transferMgr.Stop()
+		status.Status = "cancelled"
+		status.EndTime = time.Now().UTC().Format(time.RFC3339)
+		transferStatuses[requestID] = status
+		delete(transferManagers, requestID)
+	}
+
+	c.JSON(http.StatusOK, models.TransferResponse{
+		Status:    "cancelled",
+		RequestID: requestID,
+	})
 }
