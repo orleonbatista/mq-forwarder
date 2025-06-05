@@ -82,17 +82,13 @@ func (conn *MQConnection) OpenQueue(queueName string, forInput bool, nonShared b
 
 	var openOptions int32
 	if forInput {
-		openOptions = ibmmq.MQOO_INPUT_SHARED | ibmmq.MQOO_FAIL_IF_QUIESCING
+		openOptions = ibmmq.MQOO_INPUT_SHARED | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SAVE_ALL_CONTEXT
 		if nonShared {
-			openOptions = ibmmq.MQOO_INPUT_EXCLUSIVE | ibmmq.MQOO_FAIL_IF_QUIESCING
+			openOptions = ibmmq.MQOO_INPUT_EXCLUSIVE | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SAVE_ALL_CONTEXT
 		}
 	} else {
-		// Include both MQOO_PASS_ALL_CONTEXT and MQOO_SET_ALL_CONTEXT so we
-		// can either pass the context handle when transferring within the
-		// same queue manager or explicitly set the context fields when the
-		// source and destination queue managers differ.
-		openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING |
-			ibmmq.MQOO_PASS_ALL_CONTEXT | ibmmq.MQOO_SET_ALL_CONTEXT
+		// Para manter todos os campos do MQMD, use apenas MQOO_SET_ALL_CONTEXT
+		openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SET_ALL_CONTEXT
 	}
 
 	od := ibmmq.NewMQOD()
@@ -144,7 +140,8 @@ func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, bufferSize int, waitI
 }
 
 // PutMessage coloca uma mensagem em uma fila MQ, preservando o contexto da mensagem original
-func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, srcQ ibmmq.MQObject, data []byte, md *ibmmq.MQMD, commitInterval int) error {
+// contextType: "pass" para MQPMO_PASS_ALL_CONTEXT, "set" para MQPMO_SET_ALL_CONTEXT, "none" para MQPMO_NO_CONTEXT
+func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md *ibmmq.MQMD, commitInterval int, contextType string) error {
 	pmo := ibmmq.NewMQPMO()
 	if commitInterval > 0 {
 		pmo.Options |= ibmmq.MQPMO_SYNCPOINT
@@ -152,15 +149,13 @@ func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, srcQ ibmmq.MQObject, 
 		pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
 	}
 
-	// When the message is being forwarded using the same MQ connection,
-	// we can simply pass the context handle. For transfers using a
-	// different connection this would cause MQRC_CONTEXT_HANDLE_ERROR,
-	// so we copy the context fields instead.
-	if srcQ.GetHConn() == &conn.QMgr {
+	switch contextType {
+	case "pass":
 		pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
-		pmo.Context = &srcQ
-	} else {
+	case "set":
 		pmo.Options |= ibmmq.MQPMO_SET_ALL_CONTEXT
+	default:
+		pmo.Options |= ibmmq.MQPMO_NO_CONTEXT
 	}
 
 	err := queue.Put(md, pmo, data)
@@ -197,4 +192,22 @@ func (conn *MQConnection) Backout() error {
 	}
 
 	return nil
+}
+
+// NewCleanMQMD cria um novo MQMD limpo, copiando apenas campos essenciais de outro MQMD
+func NewCleanMQMD(src *ibmmq.MQMD) *ibmmq.MQMD {
+	if src == nil {
+		return ibmmq.NewMQMD()
+	}
+	md := ibmmq.NewMQMD()
+	md.Format = src.Format
+	md.Priority = src.Priority
+	md.Persistence = src.Persistence
+	md.CorrelId = src.CorrelId
+	md.MsgId = src.MsgId
+	md.UserIdentifier = src.UserIdentifier
+	md.PutApplName = src.PutApplName
+	md.PutDate = src.PutDate
+	md.PutTime = src.PutTime
+	return md
 }
