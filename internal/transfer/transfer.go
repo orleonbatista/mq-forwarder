@@ -48,7 +48,8 @@ type TransferManager struct {
 	stats         Stats
 	quit          chan struct{}
 	done          chan struct{}
-	connMu        sync.Mutex
+	srcMu         sync.Mutex
+	destMu        sync.Mutex
 	commitCounter int32
 }
 
@@ -120,7 +121,9 @@ func (tm *TransferManager) run() {
 				return
 			default:
 				start := time.Now()
+				tm.srcMu.Lock()
 				data, md, err := srcConn.GetMessage(srcQ, buffer, tm.opts.CommitInterval)
+				tm.srcMu.Unlock()
 				if err != nil {
 					tm.finishWithError(StatusFailed, err)
 					close(msgCh)
@@ -154,13 +157,17 @@ func (tm *TransferManager) run() {
 				if !ok {
 					return
 				}
-				tm.connMu.Lock()
+				tm.destMu.Lock()
 				err := destConn.PutMessage(destQ, msg.data, msg.md, tm.opts.CommitInterval, "set")
-				tm.connMu.Unlock()
+				tm.destMu.Unlock()
 				if err != nil {
 					if tm.opts.CommitInterval > 0 {
+						tm.srcMu.Lock()
+						tm.destMu.Lock()
 						_ = srcConn.Backout()
 						_ = destConn.Backout()
+						tm.destMu.Unlock()
+						tm.srcMu.Unlock()
 					}
 					tm.finishWithError(StatusFailed, err)
 					cancel()
@@ -178,18 +185,21 @@ func (tm *TransferManager) run() {
 
 				if tm.opts.CommitInterval > 0 {
 					if atomic.AddInt32(&tm.commitCounter, 1) >= int32(tm.opts.CommitInterval) {
-						tm.connMu.Lock()
+						tm.destMu.Lock()
+						tm.srcMu.Lock()
 						if err := destConn.Commit(); err != nil {
 							if backErr := srcConn.Backout(); backErr != nil {
 								_ = backErr
 							}
-							tm.connMu.Unlock()
+							tm.srcMu.Unlock()
+							tm.destMu.Unlock()
 							tm.finishWithError(StatusFailed, err)
 							cancel()
 							return
 						}
 						if err := srcConn.Commit(); err != nil {
-							tm.connMu.Unlock()
+							tm.srcMu.Unlock()
+							tm.destMu.Unlock()
 							tm.finishWithError(StatusFailed, err)
 							cancel()
 							return
@@ -198,7 +208,8 @@ func (tm *TransferManager) run() {
 						if metrics != nil {
 							metrics.CommitCounter.Add(ctx, 1)
 						}
-						tm.connMu.Unlock()
+						tm.srcMu.Unlock()
+						tm.destMu.Unlock()
 					}
 				}
 			}
