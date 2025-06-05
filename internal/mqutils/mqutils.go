@@ -143,14 +143,16 @@ func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, bufferSize int, waitI
 }
 
 // PutMessage coloca uma mensagem em uma fila MQ, preservando o contexto da mensagem original
-func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md *ibmmq.MQMD, commitInterval int) error {
+func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, srcQ ibmmq.MQObject, data []byte, md *ibmmq.MQMD, commitInterval int) error {
 	pmo := ibmmq.NewMQPMO()
 	if commitInterval > 0 {
 		pmo.Options |= ibmmq.MQPMO_SYNCPOINT
 	} else {
 		pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
 	}
-	pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
+
+       pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
+       pmo.Context = &srcQ
 
 	err := queue.Put(md, pmo, data)
 	if err != nil {
