@@ -47,7 +47,7 @@ func (c *MQConnection) GetMessage(queue struct{}, bufferSize int, waitInterval i
 	return nil, nil, nil
 }
 
-func (c *MQConnection) PutMessage(queue struct{}, srcQ struct{}, data []byte, md interface{}, commitInterval int) error {
+func (c *MQConnection) PutMessage(queue struct{}, data []byte, md interface{}, commitInterval int, contextType string) error {
 	return nil
 }
 
