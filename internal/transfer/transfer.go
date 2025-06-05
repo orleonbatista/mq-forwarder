@@ -44,14 +44,13 @@ type Stats struct {
 // TransferManager performs message transfer. This is a minimal stub
 // implementation to allow the application to compile and run tests.
 type TransferManager struct {
-	opts          TransferOptions
-	mu            sync.RWMutex
-	stats         Stats
-	quit          chan struct{}
-	done          chan struct{}
-	srcMu         sync.Mutex
-	destMu        sync.Mutex
-	commitCounter int32
+	opts   TransferOptions
+	mu     sync.RWMutex
+	stats  Stats
+	quit   chan struct{}
+	done   chan struct{}
+	srcMu  sync.Mutex
+	destMu sync.Mutex
 }
 
 type mqMessage struct {
@@ -116,6 +115,22 @@ func (tm *TransferManager) run() {
 	}
 	defer srcConn.CloseQueue(srcQ)
 
+	buffer := make([]byte, tm.opts.BufferSize)
+	pending := 0
+	idle := 0
+
+LOOP:
+	for {
+		select {
+		case <-tm.quit:
+			tm.mu.Lock()
+			tm.stats.Status = StatusCancelled
+			tm.stats.EndTime = time.Now()
+			tm.mu.Unlock()
+			break LOOP
+		default:
+		}
+
 	msgCh := make(chan mqMessage, tm.opts.BufferSize)
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -150,13 +165,30 @@ func (tm *TransferManager) run() {
 					return
 				}
 
-				cp := make([]byte, len(data))
-				copy(cp, data)
-				msgCh <- mqMessage{data: cp, md: md, start: start}
-			}
+		start := time.Now()
+		tm.srcMu.Lock()
+		data, md, err := srcConn.GetMessage(srcQ, buffer)
+		tm.srcMu.Unlock()
+		if err != nil {
+			tm.finishWithError(StatusFailed, err)
+			break LOOP
 		}
-	}()
+		if data == nil {
+			idle++
+			if idle >= 3 {
+				tm.mu.Lock()
+				tm.stats.Status = StatusCompleted
+				tm.stats.EndTime = time.Now()
+				tm.mu.Unlock()
+				break LOOP
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		idle = 0
 
+		cp := make([]byte, len(data))
+		copy(cp, data)
 	worker := func() {
 		defer wg.Done()
 		for {
@@ -183,14 +215,34 @@ func (tm *TransferManager) run() {
 					return
 				}
 
-				atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
-				atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(msg.data)))
+		tm.destMu.Lock()
+		err = destConn.PutMessage(destQ, cp, md, "set")
+		tm.destMu.Unlock()
+		if err != nil {
+			tm.srcMu.Lock()
+			tm.destMu.Lock()
+			_ = srcConn.Backout()
+			_ = destConn.Backout()
+			tm.destMu.Unlock()
+			tm.srcMu.Unlock()
+			pending = 0
+			tm.finishWithError(StatusFailed, err)
+			break LOOP
+		}
 
-				if metrics != nil {
-					metrics.MessagesTransferred.Add(ctx, 1)
-					metrics.BytesTransferred.Add(ctx, int64(len(msg.data)))
-					metrics.TransferDuration.Record(ctx, float64(time.Since(msg.start).Milliseconds()))
-				}
+		atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
+		atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(cp)))
+
+		if metrics != nil {
+			metrics.MessagesTransferred.Add(ctx, 1)
+			metrics.BytesTransferred.Add(ctx, int64(len(cp)))
+			metrics.TransferDuration.Record(ctx, float64(time.Since(start).Milliseconds()))
+		}
+
+		pending++
+		if tm.opts.CommitInterval > 0 && pending >= tm.opts.CommitInterval {
+			if err := tm.commitBatch(srcConn, destConn, ctx, metrics); err != nil {
+				break LOOP
 
 				if tm.opts.CommitInterval > 0 {
 					if atomic.AddInt32(&tm.commitCounter, 1) >= int32(tm.opts.CommitInterval) {
@@ -230,15 +282,27 @@ func (tm *TransferManager) run() {
 					}
 				}
 			}
+			pending = 0
 		}
 	}
 
-	workerCount := tm.opts.WorkerCount
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go worker()
+	if pending > 0 && tm.stats.Status != StatusFailed {
+		_ = tm.commitBatch(srcConn, destConn, ctx, metrics)
 	}
+}
 
+func (tm *TransferManager) commitBatch(srcConn, destConn *mqutils.MQConnection, ctx context.Context, metrics *otelutils.MQMetrics) error {
+	tm.destMu.Lock()
+	tm.srcMu.Lock()
+	if err := destConn.Commit(); err != nil {
+		_ = srcConn.Backout()
+		_ = destConn.Backout()
+		tm.srcMu.Unlock()
+		tm.destMu.Unlock()
+		tm.finishWithError(StatusFailed, err)
+		return err
+	}
+	if err := srcConn.Commit(); err != nil {
 	go func() {
 		<-tm.quit
 		cancel()
@@ -278,14 +342,15 @@ func (tm *TransferManager) run() {
 		}
 		tm.srcMu.Unlock()
 		tm.destMu.Unlock()
+		tm.finishWithError(StatusFailed, err)
+		return err
 	}
-
-	tm.mu.Lock()
-	if tm.stats.Status == StatusInProgress {
-		tm.stats.Status = StatusCancelled
-		tm.stats.EndTime = time.Now()
+	tm.srcMu.Unlock()
+	tm.destMu.Unlock()
+	if metrics != nil {
+		metrics.CommitCounter.Add(ctx, 1)
 	}
-	tm.mu.Unlock()
+	return nil
 }
 
 func (tm *TransferManager) finishWithError(status string, err error) {
