@@ -226,6 +226,33 @@ func (tm *TransferManager) run() {
 	cancel()
 	wg.Wait()
 
+	// Commit any remaining messages that haven't been committed yet.
+	if tm.opts.CommitInterval > 0 && atomic.LoadInt32(&tm.commitCounter) > 0 {
+		tm.destMu.Lock()
+		tm.srcMu.Lock()
+		if err := destConn.Commit(); err != nil {
+			if backErr := srcConn.Backout(); backErr != nil {
+				_ = backErr
+			}
+			tm.srcMu.Unlock()
+			tm.destMu.Unlock()
+			tm.finishWithError(StatusFailed, err)
+			return
+		}
+		if err := srcConn.Commit(); err != nil {
+			tm.srcMu.Unlock()
+			tm.destMu.Unlock()
+			tm.finishWithError(StatusFailed, err)
+			return
+		}
+		atomic.StoreInt32(&tm.commitCounter, 0)
+		if metrics != nil {
+			metrics.CommitCounter.Add(ctx, 1)
+		}
+		tm.srcMu.Unlock()
+		tm.destMu.Unlock()
+	}
+
 	tm.mu.Lock()
 	if tm.stats.Status == StatusInProgress {
 		tm.stats.Status = StatusCancelled
