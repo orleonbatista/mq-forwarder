@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,11 +43,19 @@ type Stats struct {
 // TransferManager performs message transfer. This is a minimal stub
 // implementation to allow the application to compile and run tests.
 type TransferManager struct {
-	opts  TransferOptions
-	mu    sync.RWMutex
-	stats Stats
-	quit  chan struct{}
-	done  chan struct{}
+	opts          TransferOptions
+	mu            sync.RWMutex
+	stats         Stats
+	quit          chan struct{}
+	done          chan struct{}
+	commitMu      sync.Mutex
+	commitCounter int32
+}
+
+type mqMessage struct {
+	data  []byte
+	md    interface{}
+	start time.Time
 }
 
 // NewTransferManager creates a new manager with the given options.
@@ -96,73 +105,119 @@ func (tm *TransferManager) run() {
 	}
 	defer srcConn.CloseQueue(srcQ)
 
-	commitCounter := 0
-	buffer := make([]byte, tm.opts.BufferSize)
-	for {
-		select {
-		case <-tm.quit:
-			tm.mu.Lock()
-			tm.stats.Status = StatusCancelled
-			tm.stats.EndTime = time.Now()
-			tm.mu.Unlock()
-			return
-		default:
-			start := time.Now()
-			data, md, err := srcConn.GetMessage(srcQ, buffer, tm.opts.CommitInterval)
-			if err != nil {
-				tm.finishWithError(StatusFailed, err)
-				return
-			}
-			if data == nil {
-				tm.mu.Lock()
-				tm.stats.Status = StatusCompleted
-				tm.stats.EndTime = time.Now()
-				tm.mu.Unlock()
-				return
-			}
+	msgCh := make(chan mqMessage, tm.opts.BufferSize)
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
 
-			if err := destConn.PutMessage(destQ, data, md, tm.opts.CommitInterval, "set"); err != nil {
-				if tm.opts.CommitInterval > 0 {
-					// rollback the GET on error to avoid message loss
-					_ = srcConn.Backout()
-					_ = destConn.Backout()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buffer := make([]byte, tm.opts.BufferSize)
+		for {
+			select {
+			case <-ctx.Done():
+				close(msgCh)
+				return
+			default:
+				start := time.Now()
+				data, md, err := srcConn.GetMessage(srcQ, buffer, tm.opts.CommitInterval)
+				if err != nil {
+					tm.finishWithError(StatusFailed, err)
+					close(msgCh)
+					cancel()
+					return
 				}
-				tm.finishWithError(StatusFailed, err)
+				if data == nil {
+					tm.mu.Lock()
+					tm.stats.Status = StatusCompleted
+					tm.stats.EndTime = time.Now()
+					tm.mu.Unlock()
+					close(msgCh)
+					cancel()
+					return
+				}
+
+				cp := make([]byte, len(data))
+				copy(cp, data)
+				msgCh <- mqMessage{data: cp, md: md, start: start}
+			}
+		}
+	}()
+
+	worker := func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
 				return
-			}
+			case msg, ok := <-msgCh:
+				if !ok {
+					return
+				}
+				if err := destConn.PutMessage(destQ, msg.data, msg.md, tm.opts.CommitInterval, "set"); err != nil {
+					if tm.opts.CommitInterval > 0 {
+						_ = srcConn.Backout()
+						_ = destConn.Backout()
+					}
+					tm.finishWithError(StatusFailed, err)
+					cancel()
+					return
+				}
 
-			atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
-			atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(data)))
+				atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
+				atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(msg.data)))
 
-			if metrics != nil {
-				metrics.MessagesTransferred.Add(ctx, 1)
-				metrics.BytesTransferred.Add(ctx, int64(len(data)))
-				metrics.TransferDuration.Record(ctx, float64(time.Since(start).Milliseconds()))
-			}
+				if metrics != nil {
+					metrics.MessagesTransferred.Add(ctx, 1)
+					metrics.BytesTransferred.Add(ctx, int64(len(msg.data)))
+					metrics.TransferDuration.Record(ctx, float64(time.Since(msg.start).Milliseconds()))
+				}
 
-			if tm.opts.CommitInterval > 0 {
-				commitCounter++
-				if commitCounter >= tm.opts.CommitInterval {
-					// commit destination first so source is not lost on failure
-					if err := destConn.Commit(); err != nil {
-						if backErr := srcConn.Backout(); backErr != nil {
-							_ = backErr
+				if tm.opts.CommitInterval > 0 {
+					if atomic.AddInt32(&tm.commitCounter, 1) >= int32(tm.opts.CommitInterval) {
+						tm.commitMu.Lock()
+						if err := destConn.Commit(); err != nil {
+							if backErr := srcConn.Backout(); backErr != nil {
+								_ = backErr
+							}
+							tm.commitMu.Unlock()
+							tm.finishWithError(StatusFailed, err)
+							cancel()
+							return
 						}
-						tm.finishWithError(StatusFailed, err)
-						return
-					}
-					if err := srcConn.Commit(); err != nil {
-						tm.finishWithError(StatusFailed, err)
-						return
-					}
-					commitCounter = 0
-					if metrics != nil {
-						metrics.CommitCounter.Add(ctx, 1)
+						if err := srcConn.Commit(); err != nil {
+							tm.commitMu.Unlock()
+							tm.finishWithError(StatusFailed, err)
+							cancel()
+							return
+						}
+						atomic.StoreInt32(&tm.commitCounter, 0)
+						if metrics != nil {
+							metrics.CommitCounter.Add(ctx, 1)
+						}
+						tm.commitMu.Unlock()
 					}
 				}
 			}
 		}
 	}
+
+	workerCount := runtime.NumCPU()
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go worker()
+	}
+
+	<-tm.quit
+	cancel()
+	wg.Wait()
+
+	tm.mu.Lock()
+	if tm.stats.Status == StatusInProgress {
+		tm.stats.Status = StatusCancelled
+		tm.stats.EndTime = time.Now()
+	}
+	tm.mu.Unlock()
 }
 
 func (tm *TransferManager) finishWithError(status string, err error) {
