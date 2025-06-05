@@ -53,6 +53,7 @@ func (tm *TransferManager) run() {
 	tm.mu.Lock()
 	tm.stats.Status = "in_progress"
 	tm.mu.Unlock()
+	defer close(tm.done)
 
 	metrics := otelutils.GetMetrics()
 	ctx := context.Background()
@@ -93,14 +94,12 @@ func (tm *TransferManager) run() {
 			tm.stats.Status = "cancelled"
 			tm.stats.EndTime = time.Now()
 			tm.mu.Unlock()
-			tm.done <- struct{}{}
 			return
 		default:
 			start := time.Now()
 			data, md, err := srcConn.GetMessage(srcQ, tm.opts.BufferSize, tm.opts.CommitInterval)
 			if err != nil {
 				tm.finishWithError("failed", err)
-				tm.done <- struct{}{}
 				return
 			}
 			if data == nil {
@@ -108,13 +107,11 @@ func (tm *TransferManager) run() {
 				tm.stats.Status = "completed"
 				tm.stats.EndTime = time.Now()
 				tm.mu.Unlock()
-				tm.done <- struct{}{}
 				return
 			}
 
 			if err := destConn.PutMessage(destQ, data, md, tm.opts.CommitInterval); err != nil {
 				tm.finishWithError("failed", err)
-				tm.done <- struct{}{}
 				return
 			}
 
@@ -134,12 +131,10 @@ func (tm *TransferManager) run() {
 				if commitCounter >= tm.opts.CommitInterval {
 					if err := srcConn.Commit(); err != nil {
 						tm.finishWithError("failed", err)
-						tm.done <- struct{}{}
 						return
 					}
 					if err := destConn.Commit(); err != nil {
 						tm.finishWithError("failed", err)
-						tm.done <- struct{}{}
 						return
 					}
 					commitCounter = 0
