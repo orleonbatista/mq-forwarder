@@ -48,7 +48,7 @@ type TransferManager struct {
 	stats         Stats
 	quit          chan struct{}
 	done          chan struct{}
-	commitMu      sync.Mutex
+	connMu        sync.Mutex
 	commitCounter int32
 }
 
@@ -154,7 +154,10 @@ func (tm *TransferManager) run() {
 				if !ok {
 					return
 				}
-				if err := destConn.PutMessage(destQ, msg.data, msg.md, tm.opts.CommitInterval, "set"); err != nil {
+				tm.connMu.Lock()
+				err := destConn.PutMessage(destQ, msg.data, msg.md, tm.opts.CommitInterval, "set")
+				tm.connMu.Unlock()
+				if err != nil {
 					if tm.opts.CommitInterval > 0 {
 						_ = srcConn.Backout()
 						_ = destConn.Backout()
@@ -175,18 +178,18 @@ func (tm *TransferManager) run() {
 
 				if tm.opts.CommitInterval > 0 {
 					if atomic.AddInt32(&tm.commitCounter, 1) >= int32(tm.opts.CommitInterval) {
-						tm.commitMu.Lock()
+						tm.connMu.Lock()
 						if err := destConn.Commit(); err != nil {
 							if backErr := srcConn.Backout(); backErr != nil {
 								_ = backErr
 							}
-							tm.commitMu.Unlock()
+							tm.connMu.Unlock()
 							tm.finishWithError(StatusFailed, err)
 							cancel()
 							return
 						}
 						if err := srcConn.Commit(); err != nil {
-							tm.commitMu.Unlock()
+							tm.connMu.Unlock()
 							tm.finishWithError(StatusFailed, err)
 							cancel()
 							return
@@ -195,7 +198,7 @@ func (tm *TransferManager) run() {
 						if metrics != nil {
 							metrics.CommitCounter.Add(ctx, 1)
 						}
-						tm.commitMu.Unlock()
+						tm.connMu.Unlock()
 					}
 				}
 			}
