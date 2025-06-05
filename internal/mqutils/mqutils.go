@@ -88,7 +88,10 @@ func (conn *MQConnection) OpenQueue(queueName string, forInput bool, nonShared b
 			openOptions = ibmmq.MQOO_INPUT_EXCLUSIVE | ibmmq.MQOO_FAIL_IF_QUIESCING
 		}
 	} else {
-		openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING
+		// Include MQOO_PASS_ALL_CONTEXT so we can put messages preserving
+		// the original context. Without this option the queue manager
+		// returns MQRC_CONTEXT_HANDLE_ERROR when using MQPMO_PASS_ALL_CONTEXT.
+		openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_PASS_ALL_CONTEXT
 	}
 
 	od := ibmmq.NewMQOD()
