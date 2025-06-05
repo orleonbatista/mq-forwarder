@@ -114,7 +114,7 @@ func (conn *MQConnection) CloseQueue(queue ibmmq.MQObject) error {
 
 // GetMessage obtém uma mensagem de uma fila MQ.
 // commitInterval controla se a operação é realizada dentro de uma unidade de trabalho.
-func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, bufferSize int, commitInterval int) ([]byte, *ibmmq.MQMD, error) {
+func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, buffer []byte, commitInterval int) ([]byte, *ibmmq.MQMD, error) {
 	md := ibmmq.NewMQMD()
 
 	gmo := ibmmq.NewMQGMO()
@@ -126,7 +126,9 @@ func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, bufferSize int, commi
 	}
 	gmo.WaitInterval = 5 * 1000
 
-	buffer := make([]byte, bufferSize)
+	if len(buffer) == 0 {
+		buffer = make([]byte, 1024)
+	}
 
 	datalen, err := queue.Get(md, gmo, buffer)
 	if err != nil {

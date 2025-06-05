@@ -3,6 +3,7 @@ package transfer
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mq-transfer-go/internal/mqutils"
@@ -96,6 +97,7 @@ func (tm *TransferManager) run() {
 	defer srcConn.CloseQueue(srcQ)
 
 	commitCounter := 0
+	buffer := make([]byte, tm.opts.BufferSize)
 	for {
 		select {
 		case <-tm.quit:
@@ -106,7 +108,7 @@ func (tm *TransferManager) run() {
 			return
 		default:
 			start := time.Now()
-			data, md, err := srcConn.GetMessage(srcQ, tm.opts.BufferSize, tm.opts.CommitInterval)
+			data, md, err := srcConn.GetMessage(srcQ, buffer, tm.opts.CommitInterval)
 			if err != nil {
 				tm.finishWithError(StatusFailed, err)
 				return
@@ -129,10 +131,8 @@ func (tm *TransferManager) run() {
 				return
 			}
 
-			tm.mu.Lock()
-			tm.stats.MessagesTransferred++
-			tm.stats.BytesTransferred += int64(len(data))
-			tm.mu.Unlock()
+			atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
+			atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(data)))
 
 			if metrics != nil {
 				metrics.MessagesTransferred.Add(ctx, 1)
@@ -181,6 +181,9 @@ func (tm *TransferManager) Stop() {
 // GetStats returns a snapshot of the current stats.
 func (tm *TransferManager) GetStats() Stats {
 	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-	return tm.stats
+	stats := tm.stats
+	tm.mu.RUnlock()
+	stats.MessagesTransferred = atomic.LoadInt64(&tm.stats.MessagesTransferred)
+	stats.BytesTransferred = atomic.LoadInt64(&tm.stats.BytesTransferred)
+	return stats
 }
