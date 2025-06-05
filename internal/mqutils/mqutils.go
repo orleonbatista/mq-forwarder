@@ -152,11 +152,11 @@ func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, srcQ ibmmq.MQObject, 
 		pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
 	}
 
-	// When the message is being forwarded within the same queue manager,
-	// we can simply pass the context handle. For transfers between
-	// different queue managers this would cause MQRC_CONTEXT_HANDLE_ERROR,
+	// When the message is being forwarded using the same MQ connection,
+	// we can simply pass the context handle. For transfers using a
+	// different connection this would cause MQRC_CONTEXT_HANDLE_ERROR,
 	// so we copy the context fields instead.
-	if srcQ.GetHConn().Name == conn.QMgr.Name {
+	if srcQ.GetHConn() == &conn.QMgr {
 		pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
 		pmo.Context = &srcQ
 	} else {
