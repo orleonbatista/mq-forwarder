@@ -1,213 +1,177 @@
-//go:build ibmmq
-
-package mqutils
+package transfer
 
 import (
-    "fmt"
+    "context"
+    "sync"
+    "time"
 
-    "github.com/ibm-messaging/mq-golang/v5/ibmmq"
+    "mq-transfer-go/internal/mqutils"
+    "mq-transfer-go/internal/otelutils"
 )
 
-// MQConnectionConfig contém os parâmetros de conexão para um Queue Manager MQ
-type MQConnectionConfig struct {
-    QueueManagerName    string
-    ConnectionName      string
-    Channel             string
-    Username            string
-    Password            string
+// TransferOptions defines parameters for a transfer operation.
+type TransferOptions struct {
+    SourceConfig        mqutils.MQConnectionConfig
+    SourceQueue         string
+    DestConfig          mqutils.MQConnectionConfig
+    DestQueue           string
+    BufferSize          int
+    CommitInterval      int
     NonSharedConnection bool
 }
 
-// MQConnection encapsula uma conexão com um Queue Manager MQ
-type MQConnection struct {
-    QMgr        ibmmq.MQQueueManager
-    Config      MQConnectionConfig
-    IsConnected bool
+// Stats holds runtime statistics of a transfer.
+type Stats struct {
+    MessagesTransferred int64
+    BytesTransferred    int64
+    Status              string
+    EndTime             time.Time
+    Error               string
 }
 
-// NewMQConnection cria uma nova instância de MQConnection
-func NewMQConnection(config MQConnectionConfig) *MQConnection {
-    return &MQConnection{
-        Config:      config,
-        IsConnected: false,
-    }
+// TransferManager performs message transfer. This is a minimal stub
+// implementation to allow the application to compile and run tests.
+type TransferManager struct {
+    opts  TransferOptions
+    mu    sync.RWMutex
+    stats Stats
+    quit  chan struct{}
+    done  chan struct{}
 }
 
-// Connect estabelece uma conexão com o Queue Manager MQ
-func (conn *MQConnection) Connect() error {
-    cd := ibmmq.NewMQCD()
-    cd.ChannelName = conn.Config.Channel
-    cd.ConnectionName = conn.Config.ConnectionName
+// NewTransferManager creates a new manager with the given options.
+func NewTransferManager(opts TransferOptions) *TransferManager {
+    return &TransferManager{opts: opts, stats: Stats{Status: "pending"}, quit: make(chan struct{}), done: make(chan struct{})}
+}
 
-    cno := ibmmq.NewMQCNO()
-    cno.ClientConn = cd
+// Start begins the transfer asynchronously.
+func (tm *TransferManager) Start() {
+    go tm.run()
+}
 
-    if conn.Config.Username != "" {
-        csp := ibmmq.NewMQCSP()
-        csp.UserId = conn.Config.Username
-        csp.Password = conn.Config.Password
-        cno.SecurityParms = csp
+func (tm *TransferManager) run() {
+    tm.mu.Lock()
+    tm.stats.Status = "in_progress"
+    tm.mu.Unlock()
+    defer close(tm.done)
+
+    metrics := otelutils.GetMetrics()
+    ctx := context.Background()
+
+    srcConn := mqutils.NewMQConnection(tm.opts.SourceConfig)
+    if err := srcConn.Connect(); err != nil {
+        tm.finishWithError("failed", err)
+        return
     }
+    defer srcConn.Disconnect()
 
-    var err error
-    conn.QMgr, err = ibmmq.Connx(conn.Config.QueueManagerName, cno)
+    destConn := mqutils.NewMQConnection(tm.opts.DestConfig)
+    if err := destConn.Connect(); err != nil {
+        tm.finishWithError("failed", err)
+        return
+    }
+    defer destConn.Disconnect()
+
+    destQ, err := destConn.OpenQueue(tm.opts.DestQueue, false, false)
     if err != nil {
-        return fmt.Errorf("falha ao conectar ao Queue Manager %s: %v", conn.Config.QueueManagerName, err)
+        tm.finishWithError("failed", err)
+        return
     }
+    defer destConn.CloseQueue(destQ)
 
-    conn.IsConnected = true
-    return nil
-}
-
-// Disconnect fecha a conexão com o Queue Manager MQ
-func (conn *MQConnection) Disconnect() error {
-    if !conn.IsConnected {
-        return nil
-    }
-
-    err := conn.QMgr.Disc()
+    srcQ, err := srcConn.OpenQueue(tm.opts.SourceQueue, true, tm.opts.NonSharedConnection)
     if err != nil {
-        return fmt.Errorf("falha ao desconectar do Queue Manager: %v", err)
+        tm.finishWithError("failed", err)
+        return
     }
+    defer srcConn.CloseQueue(srcQ)
 
-    conn.IsConnected = false
-    return nil
-}
+    commitCounter := 0
+    for {
+        select {
+        case <-tm.quit:
+            tm.mu.Lock()
+            tm.stats.Status = "cancelled"
+            tm.stats.EndTime = time.Now()
+            tm.mu.Unlock()
+            return
+        default:
+            start := time.Now()
+            data, md, err := srcConn.GetMessage(srcQ, tm.opts.BufferSize, tm.opts.CommitInterval)
+            if err != nil {
+                tm.finishWithError("failed", err)
+                return
+            }
+            if data == nil {
+                tm.mu.Lock()
+                tm.stats.Status = "completed"
+                tm.stats.EndTime = time.Now()
+                tm.mu.Unlock()
+                return
+            }
 
-// OpenQueue abre uma fila MQ para leitura ou escrita
-func (conn *MQConnection) OpenQueue(queueName string, forInput bool, nonShared bool) (ibmmq.MQObject, error) {
-    if !conn.IsConnected {
-        return ibmmq.MQObject{}, fmt.Errorf("não conectado ao Queue Manager")
-    }
+            if err := destConn.PutMessage(destQ, data, md, tm.opts.CommitInterval, "set"); err != nil {
+                if tm.opts.CommitInterval > 0 {
+                    // rollback the GET on error to avoid message loss
+                    _ = srcConn.Backout()
+                    _ = destConn.Backout()
+                }
+                tm.finishWithError("failed", err)
+                return
+            }
 
-    var openOptions int32
-    if forInput {
-        openOptions = ibmmq.MQOO_INPUT_SHARED | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SAVE_ALL_CONTEXT
-        if nonShared {
-            openOptions = ibmmq.MQOO_INPUT_EXCLUSIVE | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SAVE_ALL_CONTEXT
+            tm.mu.Lock()
+            tm.stats.MessagesTransferred++
+            tm.stats.BytesTransferred += int64(len(data))
+            tm.mu.Unlock()
+
+            if metrics != nil {
+                metrics.MessagesTransferred.Add(ctx, 1)
+                metrics.BytesTransferred.Add(ctx, int64(len(data)))
+                metrics.TransferDuration.Record(ctx, float64(time.Since(start).Milliseconds()))
+            }
+
+            if tm.opts.CommitInterval > 0 {
+                commitCounter++
+                if commitCounter >= tm.opts.CommitInterval {
+                    // commit destination first so source is not lost on failure
+                    if err := destConn.Commit(); err != nil {
+                        if backErr := srcConn.Backout(); backErr != nil {
+                            _ = backErr
+                        }
+                        tm.finishWithError("failed", err)
+                        return
+                    }
+                    if err := srcConn.Commit(); err != nil {
+                        tm.finishWithError("failed", err)
+                        return
+                    }
+                    commitCounter = 0
+                    if metrics != nil {
+                        metrics.CommitCounter.Add(ctx, 1)
+                    }
+                }
+            }
         }
-    } else {
-        // Para manter todos os campos do MQMD, use apenas MQOO_SET_ALL_CONTEXT
-        openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SET_ALL_CONTEXT
     }
-
-    od := ibmmq.NewMQOD()
-    od.ObjectName = queueName
-    od.ObjectType = ibmmq.MQOT_Q
-
-    queue, err := conn.QMgr.Open(od, openOptions)
-    if err != nil {
-        return ibmmq.MQObject{}, fmt.Errorf("falha ao abrir a fila %s: %v", queueName, err)
-    }
-
-    return queue, nil
 }
 
-// CloseQueue fecha uma fila MQ
-func (conn *MQConnection) CloseQueue(queue ibmmq.MQObject) error {
-    err := queue.Close(0)
-    if err != nil {
-        return fmt.Errorf("falha ao fechar a fila: %v", err)
-    }
-    return nil
+func (tm *TransferManager) finishWithError(status string, err error) {
+    tm.mu.Lock()
+    tm.stats.Status = status
+    tm.stats.Error = err.Error()
+    tm.stats.EndTime = time.Now()
+    tm.mu.Unlock()
 }
 
-// GetMessage obtém uma mensagem de uma fila MQ
-func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, bufferSize int, waitInterval int) ([]byte, *ibmmq.MQMD, error) {
-    md := ibmmq.NewMQMD()
-
-    gmo := ibmmq.NewMQGMO()
-    gmo.Options = ibmmq.MQGMO_WAIT | ibmmq.MQGMO_FAIL_IF_QUIESCING
-    if waitInterval > 0 {
-        gmo.Options |= ibmmq.MQGMO_SYNCPOINT
-    } else {
-        gmo.Options |= ibmmq.MQGMO_NO_SYNCPOINT
-    }
-    gmo.WaitInterval = 5 * 1000
-
-    buffer := make([]byte, bufferSize)
-
-    datalen, err := queue.Get(md, gmo, buffer)
-    if err != nil {
-        mqrc := err.(*ibmmq.MQReturn).MQRC
-        if mqrc == ibmmq.MQRC_NO_MSG_AVAILABLE {
-            return nil, nil, nil
-        }
-        return nil, nil, fmt.Errorf("falha ao obter mensagem: %v", err)
-    }
-
-    return buffer[:datalen], md, nil
+// Stop cancels the transfer.
+func (tm *TransferManager) Stop() {
+    close(tm.quit)
 }
 
-// PutMessage coloca uma mensagem em uma fila MQ, preservando o contexto da mensagem original
-// contextType: "pass" para MQPMO_PASS_ALL_CONTEXT, "set" para MQPMO_SET_ALL_CONTEXT, "none" para MQPMO_NO_CONTEXT
-func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md *ibmmq.MQMD, commitInterval int, contextType string) error {
-    pmo := ibmmq.NewMQPMO()
-    if commitInterval > 0 {
-        pmo.Options |= ibmmq.MQPMO_SYNCPOINT
-    } else {
-        pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
-    }
-
-    switch contextType {
-    case "pass":
-        pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
-    case "set":
-        pmo.Options |= ibmmq.MQPMO_SET_ALL_CONTEXT
-    default:
-        pmo.Options |= ibmmq.MQPMO_NO_CONTEXT
-    }
-
-    err := queue.Put(md, pmo, data)
-    if err != nil {
-        return fmt.Errorf("falha ao colocar mensagem: %v", err)
-    }
-
-    return nil
-}
-
-// Commit realiza um commit da transação atual
-func (conn *MQConnection) Commit() error {
-    if !conn.IsConnected {
-        return fmt.Errorf("não conectado ao Queue Manager")
-    }
-
-    err := conn.QMgr.Cmit()
-    if err != nil {
-        return fmt.Errorf("falha ao realizar commit: %v", err)
-    }
-
-    return nil
-}
-
-// Backout realiza um backout da transação atual
-func (conn *MQConnection) Backout() error {
-    if !conn.IsConnected {
-        return fmt.Errorf("não conectado ao Queue Manager")
-    }
-
-    err := conn.QMgr.Back()
-    if err != nil {
-        return fmt.Errorf("falha ao realizar backout: %v", err)
-    }
-
-    return nil
-}
-
-// NewCleanMQMD cria um novo MQMD limpo, copiando apenas campos essenciais de outro MQMD
-func NewCleanMQMD(src *ibmmq.MQMD) *ibmmq.MQMD {
-    if src == nil {
-        return ibmmq.NewMQMD()
-    }
-    md := ibmmq.NewMQMD()
-    md.Format = src.Format
-    md.Priority = src.Priority
-    md.Persistence = src.Persistence
-    md.CorrelId = src.CorrelId
-    md.MsgId = src.MsgId
-    md.UserIdentifier = src.UserIdentifier
-    md.PutApplName = src.PutApplName
-    md.PutDate = src.PutDate
-    md.PutTime = src.PutTime
-    return md
+// GetStats returns a snapshot of the current stats.
+func (tm *TransferManager) GetStats() Stats {
+    tm.mu.RLock()
+    defer tm.mu.RUnlock()
+    return tm.stats
 }
