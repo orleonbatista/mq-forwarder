@@ -146,7 +146,6 @@ func (tm *TransferManager) run() {
 					tm.stats.EndTime = time.Now()
 					tm.mu.Unlock()
 					close(msgCh)
-					cancel()
 					return
 				}
 
