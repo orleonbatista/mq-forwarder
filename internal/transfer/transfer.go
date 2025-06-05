@@ -222,7 +222,10 @@ func (tm *TransferManager) run() {
 		go worker()
 	}
 
-	<-tm.quit
+	select {
+	case <-tm.quit:
+	case <-ctx.Done():
+	}
 	cancel()
 	wg.Wait()
 
