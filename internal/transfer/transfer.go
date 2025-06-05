@@ -1,213 +1,213 @@
-package handlers
+//go:build ibmmq
+
+package mqutils
 
 import (
-	"net/http"
-	"sync"
-	"time"
+    "fmt"
 
-	"mq-transfer-go/api/models"
-	"mq-transfer-go/internal/mqutils"
-	"mq-transfer-go/internal/transfer"
-
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+    "github.com/ibm-messaging/mq-golang/v5/ibmmq"
 )
 
-var (
-	transferStatuses = make(map[string]models.TransferStatus)
-	transferManagers = make(map[string]*transfer.TransferManager)
-	statusMutex      = &sync.RWMutex{}
-)
-
-// @Summary Iniciar transferência de mensagens MQ
-// @Description Inicia uma transferência de mensagens de uma fila MQ para outra
-// @Tags transfer
-// @Accept json
-// @Produce json
-// @Param request body models.TransferRequest true "Detalhes da transferência"
-// @Success 202 {object} models.TransferResponse "Transferência iniciada"
-// @Failure 400 {object} models.TransferResponse "Erro na requisição"
-// @Failure 500 {object} models.TransferResponse "Erro interno"
-// @Router /api/v1/transfer [post]
-func StartTransfer(c *gin.Context) {
-	var request models.TransferRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, models.TransferResponse{
-			Status: "failed",
-			Error:  "Erro ao processar requisição: " + err.Error(),
-		})
-		return
-	}
-
-	requestID := uuid.New().String()
-
-	if request.BufferSize <= 0 {
-		request.BufferSize = 1048576
-	}
-
-	options := transfer.TransferOptions{
-		SourceConfig: mqutils.MQConnectionConfig{
-			QueueManagerName:    request.Source.QueueManagerName,
-			ConnectionName:      request.Source.ConnectionName,
-			Channel:             request.Source.Channel,
-			Username:            request.Source.Username,
-			Password:            request.Source.Password,
-			NonSharedConnection: request.NonSharedConnection,
-		},
-		SourceQueue: request.SourceQueue,
-		DestConfig: mqutils.MQConnectionConfig{
-			QueueManagerName: request.Destination.QueueManagerName,
-			ConnectionName:   request.Destination.ConnectionName,
-			Channel:          request.Destination.Channel,
-			Username:         request.Destination.Username,
-			Password:         request.Destination.Password,
-		},
-		DestQueue:           request.DestinationQueue,
-		BufferSize:          request.BufferSize,
-		CommitInterval:      request.CommitInterval,
-		NonSharedConnection: request.NonSharedConnection,
-	}
-
-	transferMgr := transfer.NewTransferManager(options)
-	transferMgr.Start()
-
-	status := models.TransferStatus{
-		RequestID:           requestID,
-		Status:              "in_progress",
-		StartTime:           time.Now().UTC().Format(time.RFC3339),
-		MessagesTransferred: 0,
-	}
-
-	statusMutex.Lock()
-	transferStatuses[requestID] = status
-	transferManagers[requestID] = transferMgr
-	statusMutex.Unlock()
-
-	go monitorTransfer(requestID, transferMgr)
-
-	c.JSON(http.StatusAccepted, models.TransferResponse{
-		RequestID: requestID,
-		Status:    "in_progress",
-	})
+// MQConnectionConfig contém os parâmetros de conexão para um Queue Manager MQ
+type MQConnectionConfig struct {
+    QueueManagerName    string
+    ConnectionName      string
+    Channel             string
+    Username            string
+    Password            string
+    NonSharedConnection bool
 }
 
-func monitorTransfer(requestID string, transferMgr *transfer.TransferManager) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		<-ticker.C
-
-		stats := transferMgr.GetStats()
-
-		statusMutex.Lock()
-		status := transferStatuses[requestID]
-		status.MessagesTransferred = int(stats.MessagesTransferred)
-		status.BytesTransferred = stats.BytesTransferred
-		status.Status = stats.Status
-
-		if stats.Status == "completed" || stats.Status == "failed" {
-			status.EndTime = stats.EndTime.UTC().Format(time.RFC3339)
-			status.Error = stats.Error
-			transferStatuses[requestID] = status
-			delete(transferManagers, requestID)
-			statusMutex.Unlock()
-			return
-		}
-
-		transferStatuses[requestID] = status
-		statusMutex.Unlock()
-	}
+// MQConnection encapsula uma conexão com um Queue Manager MQ
+type MQConnection struct {
+    QMgr        ibmmq.MQQueueManager
+    Config      MQConnectionConfig
+    IsConnected bool
 }
 
-// @Summary Obter status da transferência
-// @Description Retorna o status atual de uma transferência de mensagens
-// @Tags transfer
-// @Produce json
-// @Param requestId path string true "ID da requisição de transferência"
-// @Success 200 {object} models.TransferStatus "Status da transferência"
-// @Failure 404 {object} models.TransferResponse "Transferência não encontrada"
-// @Router /api/v1/transfer/{requestId} [get]
-func GetTransferStatus(c *gin.Context) {
-	requestID := c.Param("requestId")
-
-	statusMutex.RLock()
-	status, exists := transferStatuses[requestID]
-	statusMutex.RUnlock()
-
-	if !exists {
-		c.JSON(http.StatusNotFound, models.TransferResponse{
-			Status: "failed",
-			Error:  "Transferência não encontrada",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, status)
+// NewMQConnection cria uma nova instância de MQConnection
+func NewMQConnection(config MQConnectionConfig) *MQConnection {
+    return &MQConnection{
+        Config:      config,
+        IsConnected: false,
+    }
 }
 
-// @Summary Listar todas as transferências
-// @Description Retorna uma lista com todas as transferências e seus status
-// @Tags transfer
-// @Produce json
-// @Success 200 {array} models.TransferStatus "Lista de transferências"
-// @Router /api/v1/transfers [get]
-func ListTransfers(c *gin.Context) {
-	statusMutex.RLock()
-	defer statusMutex.RUnlock()
+// Connect estabelece uma conexão com o Queue Manager MQ
+func (conn *MQConnection) Connect() error {
+    cd := ibmmq.NewMQCD()
+    cd.ChannelName = conn.Config.Channel
+    cd.ConnectionName = conn.Config.ConnectionName
 
-	transfers := make([]models.TransferStatus, 0, len(transferStatuses))
-	for _, status := range transferStatuses {
-		transfers = append(transfers, status)
-	}
+    cno := ibmmq.NewMQCNO()
+    cno.ClientConn = cd
 
-	c.JSON(http.StatusOK, transfers)
+    if conn.Config.Username != "" {
+        csp := ibmmq.NewMQCSP()
+        csp.UserId = conn.Config.Username
+        csp.Password = conn.Config.Password
+        cno.SecurityParms = csp
+    }
+
+    var err error
+    conn.QMgr, err = ibmmq.Connx(conn.Config.QueueManagerName, cno)
+    if err != nil {
+        return fmt.Errorf("falha ao conectar ao Queue Manager %s: %v", conn.Config.QueueManagerName, err)
+    }
+
+    conn.IsConnected = true
+    return nil
 }
 
-// @Summary Cancelar uma transferência em andamento
-// @Description Cancela uma transferência de mensagens que está em andamento
-// @Tags transfer
-// @Produce json
-// @Param requestId path string true "ID da requisição de transferência"
-// @Success 200 {object} models.TransferResponse "Transferência cancelada"
-// @Failure 404 {object} models.TransferResponse "Transferência não encontrada"
-// @Failure 400 {object} models.TransferResponse "Transferência já concluída"
-// @Router /api/v1/transfer/{requestId}/cancel [post]
-func CancelTransfer(c *gin.Context) {
-	requestID := c.Param("requestId")
+// Disconnect fecha a conexão com o Queue Manager MQ
+func (conn *MQConnection) Disconnect() error {
+    if !conn.IsConnected {
+        return nil
+    }
 
-	statusMutex.Lock()
-	defer statusMutex.Unlock()
+    err := conn.QMgr.Disc()
+    if err != nil {
+        return fmt.Errorf("falha ao desconectar do Queue Manager: %v", err)
+    }
 
-	status, exists := transferStatuses[requestID]
-	if !exists {
-		c.JSON(http.StatusNotFound, models.TransferResponse{
-			Status: "failed",
-			Error:  "Transferência não encontrada",
-		})
-		return
-	}
+    conn.IsConnected = false
+    return nil
+}
 
-	if status.Status != "in_progress" {
-		c.JSON(http.StatusBadRequest, models.TransferResponse{
-			Status:    "failed",
-			Error:     "Transferência já concluída ou falhou",
-			RequestID: requestID,
-		})
-		return
-	}
+// OpenQueue abre uma fila MQ para leitura ou escrita
+func (conn *MQConnection) OpenQueue(queueName string, forInput bool, nonShared bool) (ibmmq.MQObject, error) {
+    if !conn.IsConnected {
+        return ibmmq.MQObject{}, fmt.Errorf("não conectado ao Queue Manager")
+    }
 
-	transferMgr, exists := transferManagers[requestID]
-	if exists {
-		transferMgr.Stop()
-		status.Status = "cancelled"
-		status.EndTime = time.Now().UTC().Format(time.RFC3339)
-		transferStatuses[requestID] = status
-		delete(transferManagers, requestID)
-	}
+    var openOptions int32
+    if forInput {
+        openOptions = ibmmq.MQOO_INPUT_SHARED | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SAVE_ALL_CONTEXT
+        if nonShared {
+            openOptions = ibmmq.MQOO_INPUT_EXCLUSIVE | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SAVE_ALL_CONTEXT
+        }
+    } else {
+        // Para manter todos os campos do MQMD, use apenas MQOO_SET_ALL_CONTEXT
+        openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_SET_ALL_CONTEXT
+    }
 
-	c.JSON(http.StatusOK, models.TransferResponse{
-		Status:    "cancelled",
-		RequestID: requestID,
-	})
+    od := ibmmq.NewMQOD()
+    od.ObjectName = queueName
+    od.ObjectType = ibmmq.MQOT_Q
+
+    queue, err := conn.QMgr.Open(od, openOptions)
+    if err != nil {
+        return ibmmq.MQObject{}, fmt.Errorf("falha ao abrir a fila %s: %v", queueName, err)
+    }
+
+    return queue, nil
+}
+
+// CloseQueue fecha uma fila MQ
+func (conn *MQConnection) CloseQueue(queue ibmmq.MQObject) error {
+    err := queue.Close(0)
+    if err != nil {
+        return fmt.Errorf("falha ao fechar a fila: %v", err)
+    }
+    return nil
+}
+
+// GetMessage obtém uma mensagem de uma fila MQ
+func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, bufferSize int, waitInterval int) ([]byte, *ibmmq.MQMD, error) {
+    md := ibmmq.NewMQMD()
+
+    gmo := ibmmq.NewMQGMO()
+    gmo.Options = ibmmq.MQGMO_WAIT | ibmmq.MQGMO_FAIL_IF_QUIESCING
+    if waitInterval > 0 {
+        gmo.Options |= ibmmq.MQGMO_SYNCPOINT
+    } else {
+        gmo.Options |= ibmmq.MQGMO_NO_SYNCPOINT
+    }
+    gmo.WaitInterval = 5 * 1000
+
+    buffer := make([]byte, bufferSize)
+
+    datalen, err := queue.Get(md, gmo, buffer)
+    if err != nil {
+        mqrc := err.(*ibmmq.MQReturn).MQRC
+        if mqrc == ibmmq.MQRC_NO_MSG_AVAILABLE {
+            return nil, nil, nil
+        }
+        return nil, nil, fmt.Errorf("falha ao obter mensagem: %v", err)
+    }
+
+    return buffer[:datalen], md, nil
+}
+
+// PutMessage coloca uma mensagem em uma fila MQ, preservando o contexto da mensagem original
+// contextType: "pass" para MQPMO_PASS_ALL_CONTEXT, "set" para MQPMO_SET_ALL_CONTEXT, "none" para MQPMO_NO_CONTEXT
+func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md *ibmmq.MQMD, commitInterval int, contextType string) error {
+    pmo := ibmmq.NewMQPMO()
+    if commitInterval > 0 {
+        pmo.Options |= ibmmq.MQPMO_SYNCPOINT
+    } else {
+        pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
+    }
+
+    switch contextType {
+    case "pass":
+        pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
+    case "set":
+        pmo.Options |= ibmmq.MQPMO_SET_ALL_CONTEXT
+    default:
+        pmo.Options |= ibmmq.MQPMO_NO_CONTEXT
+    }
+
+    err := queue.Put(md, pmo, data)
+    if err != nil {
+        return fmt.Errorf("falha ao colocar mensagem: %v", err)
+    }
+
+    return nil
+}
+
+// Commit realiza um commit da transação atual
+func (conn *MQConnection) Commit() error {
+    if !conn.IsConnected {
+        return fmt.Errorf("não conectado ao Queue Manager")
+    }
+
+    err := conn.QMgr.Cmit()
+    if err != nil {
+        return fmt.Errorf("falha ao realizar commit: %v", err)
+    }
+
+    return nil
+}
+
+// Backout realiza um backout da transação atual
+func (conn *MQConnection) Backout() error {
+    if !conn.IsConnected {
+        return fmt.Errorf("não conectado ao Queue Manager")
+    }
+
+    err := conn.QMgr.Back()
+    if err != nil {
+        return fmt.Errorf("falha ao realizar backout: %v", err)
+    }
+
+    return nil
+}
+
+// NewCleanMQMD cria um novo MQMD limpo, copiando apenas campos essenciais de outro MQMD
+func NewCleanMQMD(src *ibmmq.MQMD) *ibmmq.MQMD {
+    if src == nil {
+        return ibmmq.NewMQMD()
+    }
+    md := ibmmq.NewMQMD()
+    md.Format = src.Format
+    md.Priority = src.Priority
+    md.Persistence = src.Persistence
+    md.CorrelId = src.CorrelId
+    md.MsgId = src.MsgId
+    md.UserIdentifier = src.UserIdentifier
+    md.PutApplName = src.PutApplName
+    md.PutDate = src.PutDate
+    md.PutTime = src.PutTime
+    return md
 }
