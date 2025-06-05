@@ -146,6 +146,7 @@ func (tm *TransferManager) run() {
 					tm.stats.EndTime = time.Now()
 					tm.mu.Unlock()
 					close(msgCh)
+					cancel()
 					return
 				}
 
@@ -177,6 +178,7 @@ func (tm *TransferManager) run() {
 						_ = destConn.Backout()
 						tm.destMu.Unlock()
 						tm.srcMu.Unlock()
+						atomic.StoreInt32(&tm.commitCounter, 0)
 					}
 					tm.finishWithError(StatusFailed, err)
 					cancel()
@@ -202,6 +204,7 @@ func (tm *TransferManager) run() {
 							}
 							tm.srcMu.Unlock()
 							tm.destMu.Unlock()
+							atomic.StoreInt32(&tm.commitCounter, 0)
 							tm.finishWithError(StatusFailed, err)
 							cancel()
 							return
@@ -209,6 +212,7 @@ func (tm *TransferManager) run() {
 						if err := srcConn.Commit(); err != nil {
 							tm.srcMu.Unlock()
 							tm.destMu.Unlock()
+							atomic.StoreInt32(&tm.commitCounter, 0)
 							tm.finishWithError(StatusFailed, err)
 							cancel()
 							return
