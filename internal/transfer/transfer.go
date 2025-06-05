@@ -110,7 +110,12 @@ func (tm *TransferManager) run() {
 				return
 			}
 
-                       if err := destConn.PutMessage(destQ, srcQ, data, md, tm.opts.CommitInterval); err != nil {
+			if err := destConn.PutMessage(destQ, srcQ, data, md, tm.opts.CommitInterval); err != nil {
+				if tm.opts.CommitInterval > 0 {
+					// rollback the GET on error to avoid message loss
+					_ = srcConn.Backout()
+					_ = destConn.Backout()
+				}
 				tm.finishWithError("failed", err)
 				return
 			}
@@ -129,11 +134,15 @@ func (tm *TransferManager) run() {
 			if tm.opts.CommitInterval > 0 {
 				commitCounter++
 				if commitCounter >= tm.opts.CommitInterval {
-					if err := srcConn.Commit(); err != nil {
+					// commit destination first so source is not lost on failure
+					if err := destConn.Commit(); err != nil {
+						if backErr := srcConn.Backout(); backErr != nil {
+							_ = backErr
+						}
 						tm.finishWithError("failed", err)
 						return
 					}
-					if err := destConn.Commit(); err != nil {
+					if err := srcConn.Commit(); err != nil {
 						tm.finishWithError("failed", err)
 						return
 					}
