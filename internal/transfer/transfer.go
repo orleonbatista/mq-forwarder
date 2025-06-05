@@ -161,8 +161,6 @@ func (tm *TransferManager) run() {
 		defer wg.Done()
 		for {
 			select {
-			case <-ctx.Done():
-				return
 			case msg, ok := <-msgCh:
 				if !ok {
 					return
@@ -202,6 +200,9 @@ func (tm *TransferManager) run() {
 							if backErr := srcConn.Backout(); backErr != nil {
 								_ = backErr
 							}
+							if backErr := destConn.Backout(); backErr != nil {
+								_ = backErr
+							}
 							tm.srcMu.Unlock()
 							tm.destMu.Unlock()
 							atomic.StoreInt32(&tm.commitCounter, 0)
@@ -210,6 +211,9 @@ func (tm *TransferManager) run() {
 							return
 						}
 						if err := srcConn.Commit(); err != nil {
+							if backErr := destConn.Backout(); backErr != nil {
+								_ = backErr
+							}
 							tm.srcMu.Unlock()
 							tm.destMu.Unlock()
 							atomic.StoreInt32(&tm.commitCounter, 0)
@@ -235,12 +239,13 @@ func (tm *TransferManager) run() {
 		go worker()
 	}
 
-	select {
-	case <-tm.quit:
-	case <-ctx.Done():
-	}
-	cancel()
+	go func() {
+		<-tm.quit
+		cancel()
+	}()
+
 	wg.Wait()
+	cancel()
 
 	// Commit any remaining messages that haven't been committed yet.
 	if tm.opts.CommitInterval > 0 && atomic.LoadInt32(&tm.commitCounter) > 0 {
@@ -250,12 +255,18 @@ func (tm *TransferManager) run() {
 			if backErr := srcConn.Backout(); backErr != nil {
 				_ = backErr
 			}
+			if backErr := destConn.Backout(); backErr != nil {
+				_ = backErr
+			}
 			tm.srcMu.Unlock()
 			tm.destMu.Unlock()
 			tm.finishWithError(StatusFailed, err)
 			return
 		}
 		if err := srcConn.Commit(); err != nil {
+			if backErr := destConn.Backout(); backErr != nil {
+				_ = backErr
+			}
 			tm.srcMu.Unlock()
 			tm.destMu.Unlock()
 			tm.finishWithError(StatusFailed, err)
