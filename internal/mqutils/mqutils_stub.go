@@ -43,7 +43,7 @@ func (c *MQConnection) OpenQueue(queueName string, forInput bool, nonShared bool
 
 func (c *MQConnection) CloseQueue(queue struct{}) error { return nil }
 
-func (c *MQConnection) GetMessage(queue struct{}, bufferSize int, waitInterval int) ([]byte, interface{}, error) {
+func (c *MQConnection) GetMessage(queue struct{}, bufferSize int, commitInterval int) ([]byte, interface{}, error) {
 	return nil, nil, nil
 }
 
