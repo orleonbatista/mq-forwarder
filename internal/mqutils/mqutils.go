@@ -112,18 +112,13 @@ func (conn *MQConnection) CloseQueue(queue ibmmq.MQObject) error {
 	return nil
 }
 
-// GetMessage obtém uma mensagem de uma fila MQ.
-// commitInterval controla se a operação é realizada dentro de uma unidade de trabalho.
-func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, buffer []byte, commitInterval int) ([]byte, *ibmmq.MQMD, error) {
+// GetMessage obtém uma mensagem de uma fila MQ utilizando MQGMO_SYNCPOINT para
+// que a remoção só seja confirmada após o Commit().
+func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, buffer []byte) ([]byte, *ibmmq.MQMD, error) {
 	md := ibmmq.NewMQMD()
 
 	gmo := ibmmq.NewMQGMO()
-	gmo.Options = ibmmq.MQGMO_WAIT | ibmmq.MQGMO_FAIL_IF_QUIESCING
-	if commitInterval > 0 {
-		gmo.Options |= ibmmq.MQGMO_SYNCPOINT
-	} else {
-		gmo.Options |= ibmmq.MQGMO_NO_SYNCPOINT
-	}
+	gmo.Options = ibmmq.MQGMO_WAIT | ibmmq.MQGMO_FAIL_IF_QUIESCING | ibmmq.MQGMO_SYNCPOINT
 	gmo.WaitInterval = 5 * 1000
 
 	if len(buffer) == 0 {
@@ -142,9 +137,9 @@ func (conn *MQConnection) GetMessage(queue ibmmq.MQObject, buffer []byte, commit
 	return buffer[:datalen], md, nil
 }
 
-// PutMessage coloca uma mensagem em uma fila MQ, preservando o contexto da mensagem original
+// PutMessage coloca uma mensagem em uma fila MQ sob controle transacional.
 // contextType: "pass" para MQPMO_PASS_ALL_CONTEXT, "set" para MQPMO_SET_ALL_CONTEXT, "none" para MQPMO_NO_CONTEXT
-func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md interface{}, commitInterval int, contextType string) error {
+func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md interface{}, contextType string) error {
 	mqmd, ok := md.(*ibmmq.MQMD)
 	if !ok {
 		// Ensure we always have a valid MQMD
@@ -156,11 +151,7 @@ func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md inter
 	}
 
 	pmo := ibmmq.NewMQPMO()
-	if commitInterval > 0 {
-		pmo.Options |= ibmmq.MQPMO_SYNCPOINT
-	} else {
-		pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
-	}
+	pmo.Options |= ibmmq.MQPMO_SYNCPOINT
 
 	switch contextType {
 	case "pass":

@@ -29,6 +29,7 @@ type TransferOptions struct {
 	BufferSize          int
 	CommitInterval      int
 	NonSharedConnection bool
+	WorkerCount         int
 }
 
 // Stats holds runtime statistics of a transfer.
@@ -61,6 +62,15 @@ type mqMessage struct {
 
 // NewTransferManager creates a new manager with the given options.
 func NewTransferManager(opts TransferOptions) *TransferManager {
+	if opts.CommitInterval <= 0 {
+		opts.CommitInterval = 10
+	}
+	if opts.WorkerCount <= 0 {
+		opts.WorkerCount = runtime.NumCPU()
+	}
+	if opts.BufferSize <= 0 {
+		opts.BufferSize = 1024 * 1024
+	}
 	return &TransferManager{opts: opts, stats: Stats{Status: StatusPending}, quit: make(chan struct{}), done: make(chan struct{})}
 }
 
@@ -122,7 +132,7 @@ func (tm *TransferManager) run() {
 			default:
 				start := time.Now()
 				tm.srcMu.Lock()
-				data, md, err := srcConn.GetMessage(srcQ, buffer, tm.opts.CommitInterval)
+				data, md, err := srcConn.GetMessage(srcQ, buffer)
 				tm.srcMu.Unlock()
 				if err != nil {
 					tm.finishWithError(StatusFailed, err)
@@ -158,7 +168,7 @@ func (tm *TransferManager) run() {
 					return
 				}
 				tm.destMu.Lock()
-				err := destConn.PutMessage(destQ, msg.data, msg.md, tm.opts.CommitInterval, "set")
+				err := destConn.PutMessage(destQ, msg.data, msg.md, "set")
 				tm.destMu.Unlock()
 				if err != nil {
 					if tm.opts.CommitInterval > 0 {
@@ -216,7 +226,7 @@ func (tm *TransferManager) run() {
 		}
 	}
 
-	workerCount := runtime.NumCPU()
+	workerCount := tm.opts.WorkerCount
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go worker()

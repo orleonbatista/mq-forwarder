@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -47,6 +49,25 @@ func StartTransfer(c *gin.Context) {
 		request.BufferSize = 1048576
 	}
 
+	workerCount := 0
+	if wcEnv := os.Getenv("WORKER_COUNT"); wcEnv != "" {
+		if v, err := strconv.Atoi(wcEnv); err == nil && v > 0 {
+			workerCount = v
+		}
+	}
+
+	commitInterval := request.CommitInterval
+	if commitInterval <= 0 {
+		if ciEnv := os.Getenv("BATCH_SIZE"); ciEnv != "" {
+			if v, err := strconv.Atoi(ciEnv); err == nil && v > 0 {
+				commitInterval = v
+			}
+		}
+	}
+	if commitInterval <= 0 {
+		commitInterval = 10
+	}
+
 	options := transfer.TransferOptions{
 		SourceConfig: mqutils.MQConnectionConfig{
 			QueueManagerName:    request.Source.QueueManagerName,
@@ -66,8 +87,9 @@ func StartTransfer(c *gin.Context) {
 		},
 		DestQueue:           request.DestinationQueue,
 		BufferSize:          request.BufferSize,
-		CommitInterval:      request.CommitInterval,
+		CommitInterval:      commitInterval,
 		NonSharedConnection: request.NonSharedConnection,
+		WorkerCount:         workerCount,
 	}
 
 	transferMgr := transfer.NewTransferManager(options)

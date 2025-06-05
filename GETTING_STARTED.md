@@ -27,6 +27,8 @@ go run -tags ibmmq main.go
 
 - `ENV`: define o ambiente (padrão `development`)
 - `OTLP_ENDPOINT`: endpoint OTLP para exportação de métricas (opcional)
+- `WORKER_COUNT`: número de goroutines para processamento paralelo (opcional)
+- `BATCH_SIZE`: tamanho do lote de mensagens por commit (padrão 10)
 
 ## Uso da API
 

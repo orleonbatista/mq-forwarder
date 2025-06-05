@@ -79,7 +79,12 @@ Retorna o status de saúde da aplicação.
 
 - **bufferSize**: tamanho do buffer para operação `MQGET` (padrão 1MB).
 - **nonSharedConnection**: abre a fila de origem em modo exclusivo quando `true`.
-- **commitInterval**: define o número de mensagens processadas antes do commit. Valor 0 desativa transações.
+- **commitInterval**: define o número de mensagens processadas antes do commit. Caso omisso, o valor padrão de 10 é utilizado.
+
+### Variáveis de Ambiente
+
+- **WORKER_COUNT**: define o número de goroutines para processar mensagens em paralelo. Quando não informado, utiliza o número de CPUs.
+- **BATCH_SIZE**: tamanho do lote de mensagens antes do commit quando `commitInterval` não é especificado na requisição.
 
 ### Métricas OpenTelemetry
 
