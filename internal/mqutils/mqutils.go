@@ -88,10 +88,12 @@ func (conn *MQConnection) OpenQueue(queueName string, forInput bool, nonShared b
 			openOptions = ibmmq.MQOO_INPUT_EXCLUSIVE | ibmmq.MQOO_FAIL_IF_QUIESCING
 		}
 	} else {
-		// Include MQOO_PASS_ALL_CONTEXT so we can put messages preserving
-		// the original context. Without this option the queue manager
-		// returns MQRC_CONTEXT_HANDLE_ERROR when using MQPMO_PASS_ALL_CONTEXT.
-		openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING | ibmmq.MQOO_PASS_ALL_CONTEXT
+		// Include both MQOO_PASS_ALL_CONTEXT and MQOO_SET_ALL_CONTEXT so we
+		// can either pass the context handle when transferring within the
+		// same queue manager or explicitly set the context fields when the
+		// source and destination queue managers differ.
+		openOptions = ibmmq.MQOO_OUTPUT | ibmmq.MQOO_FAIL_IF_QUIESCING |
+			ibmmq.MQOO_PASS_ALL_CONTEXT | ibmmq.MQOO_SET_ALL_CONTEXT
 	}
 
 	od := ibmmq.NewMQOD()
@@ -151,8 +153,16 @@ func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, srcQ ibmmq.MQObject, 
 		pmo.Options |= ibmmq.MQPMO_NO_SYNCPOINT
 	}
 
-       pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
-       pmo.Context = &srcQ
+	// When the message is being forwarded within the same queue manager,
+	// we can simply pass the context handle. For transfers between
+	// different queue managers this would cause MQRC_CONTEXT_HANDLE_ERROR,
+	// so we copy the context fields instead.
+	if srcQ.GetHConn().Name == conn.QMgr.Name {
+		pmo.Options |= ibmmq.MQPMO_PASS_ALL_CONTEXT
+		pmo.Context = &srcQ
+	} else {
+		pmo.Options |= ibmmq.MQPMO_SET_ALL_CONTEXT
+	}
 
 	err := queue.Put(md, pmo, data)
 	if err != nil {
