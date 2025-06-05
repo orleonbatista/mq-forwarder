@@ -110,7 +110,7 @@ func (tm *TransferManager) run() {
 				return
 			}
 
-			if err := destConn.PutMessage(destQ, data, md, tm.opts.CommitInterval); err != nil {
+                       if err := destConn.PutMessage(destQ, srcQ, data, md, tm.opts.CommitInterval); err != nil {
 				tm.finishWithError("failed", err)
 				return
 			}
