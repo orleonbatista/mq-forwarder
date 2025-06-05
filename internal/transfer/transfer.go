@@ -146,7 +146,6 @@ func (tm *TransferManager) run() {
 					tm.stats.EndTime = time.Now()
 					tm.mu.Unlock()
 					close(msgCh)
-					cancel()
 					return
 				}
 
@@ -161,8 +160,6 @@ func (tm *TransferManager) run() {
 		defer wg.Done()
 		for {
 			select {
-			case <-ctx.Done():
-				return
 			case msg, ok := <-msgCh:
 				if !ok {
 					return
@@ -235,12 +232,13 @@ func (tm *TransferManager) run() {
 		go worker()
 	}
 
-	select {
-	case <-tm.quit:
-	case <-ctx.Done():
-	}
-	cancel()
+	go func() {
+		<-tm.quit
+		cancel()
+	}()
+
 	wg.Wait()
+	cancel()
 
 	// Commit any remaining messages that haven't been committed yet.
 	if tm.opts.CommitInterval > 0 && atomic.LoadInt32(&tm.commitCounter) > 0 {
