@@ -2,6 +2,8 @@
 
 Aplicação escrita em Go para transferir mensagens entre filas IBM MQ. Ela expõe uma API REST usando o framework Gin e registra métricas opcionais via OpenTelemetry.
 
+Cada instância de worker abre conexões próprias com as filas de origem e destino, permitindo o processamento totalmente paralelo em máquinas multi-core.
+
 A lógica de transferência está no pacote `internal/transfer`, que possui uma implementação simplificada para facilitar testes. A integração real com o MQ só é ativada quando o projeto é compilado com as bibliotecas C do IBM MQ (tag de build `ibmmq`).
 
 Para instruções de instalação e exemplos de uso, consulte o arquivo [GETTING_STARTED.md](GETTING_STARTED.md).
@@ -83,7 +85,7 @@ Retorna o status de saúde da aplicação.
 
 ### Variáveis de Ambiente
 
-- **WORKER_COUNT**: define o número de goroutines para processar mensagens em paralelo. Quando não informado, utiliza o número de CPUs.
+- **WORKER_COUNT**: define o número de goroutines/threads de transferência. Cada worker mantém suas próprias conexões de origem e destino, permitindo aproveitar todos os núcleos disponíveis.
 - **BATCH_SIZE**: tamanho do lote de mensagens antes do commit quando `commitInterval` não é especificado na requisição.
 - **BUFFER_SIZE**: define o tamanho do buffer utilizado para ler mensagens quando `bufferSize` não é informado na requisição.
 
