@@ -46,6 +46,13 @@ func StartTransfer(c *gin.Context) {
 	requestID := uuid.New().String()
 
 	if request.BufferSize <= 0 {
+		if bsEnv := os.Getenv("BUFFER_SIZE"); bsEnv != "" {
+			if v, err := strconv.Atoi(bsEnv); err == nil && v > 0 {
+				request.BufferSize = v
+			}
+		}
+	}
+	if request.BufferSize <= 0 {
 		request.BufferSize = 1048576
 	}
 

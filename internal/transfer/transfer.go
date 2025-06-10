@@ -52,6 +52,7 @@ type TransferManager struct {
 	srcMu         sync.Mutex
 	destMu        sync.Mutex
 	commitCounter int32
+	bufferPool    sync.Pool
 }
 
 type mqMessage struct {
@@ -71,7 +72,14 @@ func NewTransferManager(opts TransferOptions) *TransferManager {
 	if opts.BufferSize <= 0 {
 		opts.BufferSize = 1024 * 1024
 	}
-	return &TransferManager{opts: opts, stats: Stats{Status: StatusPending}, quit: make(chan struct{}), done: make(chan struct{})}
+	tm := &TransferManager{
+		opts:  opts,
+		stats: Stats{Status: StatusPending},
+		quit:  make(chan struct{}),
+		done:  make(chan struct{}),
+	}
+	tm.bufferPool.New = func() interface{} { return make([]byte, opts.BufferSize) }
+	return tm
 }
 
 // Start begins the transfer asynchronously.
@@ -156,12 +164,21 @@ func (tm *TransferManager) run() {
 					cancel()
 					return
 				}
-				time.Sleep(time.Second)
+				select {
+				case <-time.After(time.Second):
+				case <-ctx.Done():
+					close(msgCh)
+					return
+				}
 				continue
 			}
 			idle = 0
 
-			cp := make([]byte, len(data))
+			bufCopy := tm.bufferPool.Get().([]byte)
+			if cap(bufCopy) < len(data) {
+				bufCopy = make([]byte, len(data))
+			}
+			cp := bufCopy[:len(data)]
 			copy(cp, data)
 			msgCh <- mqMessage{data: cp, md: md, start: start}
 		}
@@ -183,6 +200,7 @@ func (tm *TransferManager) run() {
 					tm.destMu.Lock()
 					err := destConn.PutMessage(destQ, msg.data, msg.md, "set")
 					tm.destMu.Unlock()
+					tm.bufferPool.Put(msg.data[:cap(msg.data)])
 					if err != nil {
 						if tm.opts.CommitInterval > 0 {
 							tm.srcMu.Lock()

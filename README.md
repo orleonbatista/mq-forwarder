@@ -85,6 +85,7 @@ Retorna o status de saúde da aplicação.
 
 - **WORKER_COUNT**: define o número de goroutines para processar mensagens em paralelo. Quando não informado, utiliza o número de CPUs.
 - **BATCH_SIZE**: tamanho do lote de mensagens antes do commit quando `commitInterval` não é especificado na requisição.
+- **BUFFER_SIZE**: define o tamanho do buffer utilizado para ler mensagens quando `bufferSize` não é informado na requisição.
 
 ### Métricas OpenTelemetry
 

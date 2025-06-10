@@ -29,6 +29,7 @@ go run -tags ibmmq main.go
 - `OTLP_ENDPOINT`: endpoint OTLP para exportação de métricas (opcional)
 - `WORKER_COUNT`: número de goroutines para processamento paralelo (opcional)
 - `BATCH_SIZE`: tamanho do lote de mensagens por commit (padrão 10)
+- `BUFFER_SIZE`: tamanho do buffer utilizado para ler mensagens quando não especificado na requisição (opcional)
 
 ## Uso da API
 
