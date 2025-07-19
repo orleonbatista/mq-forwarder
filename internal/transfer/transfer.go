@@ -292,3 +292,11 @@ func (tm *TransferManager) GetStats() Stats {
 	stats.BytesTransferred = atomic.LoadInt64(&tm.stats.BytesTransferred)
 	return stats
 }
+
+// SetStatsForTest allows tests to set internal stats directly.
+// It has no effect on production usage.
+func (tm *TransferManager) SetStatsForTest(s Stats) {
+	tm.mu.Lock()
+	tm.stats = s
+	tm.mu.Unlock()
+}

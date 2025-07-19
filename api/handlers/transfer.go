@@ -21,7 +21,12 @@ var (
 )
 
 // statusTTL defines how long finished transfer statuses are kept in memory.
-const statusTTL = 10 * time.Minute
+// It is a variable so tests can shorten the duration.
+var statusTTL = 10 * time.Minute
+
+// monitorInterval controls how often the monitor goroutine checks transfer
+// status. It is exported as a variable to allow tests to speed up execution.
+var monitorInterval = time.Second
 
 // @Summary Iniciar transferência de mensagens MQ
 // @Description Inicia uma transferência de mensagens de uma fila MQ para outra
@@ -123,7 +128,7 @@ func StartTransfer(c *gin.Context) {
 }
 
 func monitorTransfer(requestID string, transferMgr *transfer.TransferManager) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(monitorInterval)
 	defer ticker.Stop()
 
 	for {

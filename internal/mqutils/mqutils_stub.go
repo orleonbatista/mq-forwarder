@@ -20,11 +20,20 @@ type MQConnection struct {
 	IsConnected bool
 }
 
+// Testing controls
+var (
+	ReturnNilMessage bool
+	FailConnect      bool
+)
+
 func NewMQConnection(config MQConnectionConfig) *MQConnection {
 	return &MQConnection{Config: config}
 }
 
 func (c *MQConnection) Connect() error {
+	if FailConnect {
+		return errors.New("connect fail")
+	}
 	c.IsConnected = true
 	return nil
 }
@@ -44,6 +53,9 @@ func (c *MQConnection) OpenQueue(queueName string, forInput bool, nonShared bool
 func (c *MQConnection) CloseQueue(queue struct{}) error { return nil }
 
 func (c *MQConnection) GetMessage(queue struct{}, buffer []byte) ([]byte, interface{}, error) {
+	if ReturnNilMessage {
+		return nil, nil, nil
+	}
 	if len(buffer) == 0 {
 		buffer = make([]byte, 1)
 	}
