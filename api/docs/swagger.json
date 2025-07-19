@@ -21,6 +21,26 @@
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/api/v1/health": {
+            "get": {
+                "description": "Retorna informacoes de saude da aplicacao",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health Check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/transfer": {
             "post": {
                 "description": "Inicia uma transferência de mensagens de uma fila MQ para outra",
@@ -195,6 +215,19 @@
                 "username": {
                     "type": "string",
                     "example": "mquser"
+                }
+            }
+        },
+        "models.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.0.0"
                 }
             }
         },

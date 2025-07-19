@@ -75,7 +75,7 @@ Cancela uma transferência em andamento.
 
 `GET /api/v1/health`
 
-Retorna o status de saúde da aplicação.
+Retorna o status de saúde e a versão atual da aplicação.
 
 ### Parâmetros de Configuração
 
