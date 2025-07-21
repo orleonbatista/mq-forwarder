@@ -29,9 +29,11 @@ var (
 	openCalls        int
 	FailPut          bool
 	FailCommit       bool
+	FailCommitCall   int
 	FailGet          bool
 	Messages         []bool
 	msgIndex         int
+	CommitCalls      int
 )
 
 func ResetTestState() {
@@ -42,9 +44,11 @@ func ResetTestState() {
 	openCalls = 0
 	FailPut = false
 	FailCommit = false
+	FailCommitCall = 0
 	FailGet = false
 	Messages = nil
 	msgIndex = 0
+	CommitCalls = 0
 }
 
 func NewMQConnection(config MQConnectionConfig) *MQConnection {
@@ -112,8 +116,12 @@ func (c *MQConnection) PutMessage(queue struct{}, data []byte, md interface{}, c
 }
 
 func (c *MQConnection) Commit() error {
+	CommitCalls++
 	if FailCommit {
 		FailCommit = false
+		return errors.New("commit fail")
+	}
+	if FailCommitCall > 0 && CommitCalls == FailCommitCall {
 		return errors.New("commit fail")
 	}
 	return nil

@@ -169,14 +169,17 @@ func TestMonitorTransferCompleted(t *testing.T) {
 	transferManagers[id] = tm
 	statusMutex.Unlock()
 	go monitorTransfer(id, tm)
-	time.Sleep(6 * time.Millisecond)
-	statusMutex.RLock()
-	_, okMgr := transferManagers[id]
-	_, okStat := transferStatuses[id]
-	statusMutex.RUnlock()
-	if okMgr || okStat {
-		t.Fatalf("expected cleanup")
+	for i := 0; i < 10; i++ {
+		time.Sleep(5 * time.Millisecond)
+		statusMutex.RLock()
+		_, okMgr := transferManagers[id]
+		_, okStat := transferStatuses[id]
+		statusMutex.RUnlock()
+		if !okMgr && !okStat {
+			return
+		}
 	}
+	t.Fatalf("expected cleanup")
 }
 
 func TestStartTransferDefaultInterval(t *testing.T) {
@@ -203,4 +206,58 @@ func TestStartTransferDefaultInterval(t *testing.T) {
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Params = gin.Params{gin.Param{Key: "requestId", Value: resp.RequestID}}
 	CancelTransfer(c2)
+}
+
+func TestResolveBufferSize(t *testing.T) {
+	t.Setenv("BUFFER_SIZE", "2")
+	if v := resolveBufferSize(0); v != 2 {
+		t.Fatalf("env not used")
+	}
+	if v := resolveBufferSize(3); v != 3 {
+		t.Fatalf("param not used")
+	}
+}
+
+func TestListTransfersWithEntries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetGlobals()
+	statusTTL = time.Hour
+	statusMutex.Lock()
+	transferStatuses["a"] = models.TransferStatus{RequestID: "a"}
+	transferStatuses["b"] = models.TransferStatus{RequestID: "b"}
+	statusMutex.Unlock()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	ListTransfers(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status")
+	}
+	var out []models.TransferStatus
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 entries")
+	}
+}
+
+func TestMonitorTransferProgress(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetGlobals()
+	id := "pid"
+	tm := transfer.NewTransferManager(transfer.TransferOptions{})
+	tm.SetStatsForTest(transfer.Stats{Status: transfer.StatusInProgress})
+	statusMutex.Lock()
+	transferStatuses[id] = models.TransferStatus{RequestID: id}
+	transferManagers[id] = tm
+	statusMutex.Unlock()
+	go monitorTransfer(id, tm)
+	time.Sleep(2 * time.Millisecond)
+	tm.SetStatsForTest(transfer.Stats{Status: transfer.StatusCompleted, EndTime: time.Now()})
+	time.Sleep(5 * time.Millisecond)
+	statusMutex.RLock()
+	_, okMgr := transferManagers[id]
+	_, okStat := transferStatuses[id]
+	statusMutex.RUnlock()
+	if okMgr || okStat {
+		t.Fatalf("expected cleanup")
+	}
 }
