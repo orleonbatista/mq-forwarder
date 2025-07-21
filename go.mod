@@ -1,8 +1,6 @@
 module mq-transfer-go
 
-go 1.23.0
-
-toolchain go1.23.8
+go 1.23
 
 require (
 	github.com/gin-gonic/gin v1.10.1
