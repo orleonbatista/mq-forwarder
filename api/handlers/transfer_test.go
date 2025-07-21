@@ -169,7 +169,7 @@ func TestMonitorTransferCompleted(t *testing.T) {
 	transferManagers[id] = tm
 	statusMutex.Unlock()
 	go monitorTransfer(id, tm)
-	time.Sleep(3 * time.Millisecond)
+	time.Sleep(6 * time.Millisecond)
 	statusMutex.RLock()
 	_, okMgr := transferManagers[id]
 	_, okStat := transferStatuses[id]
@@ -177,4 +177,30 @@ func TestMonitorTransferCompleted(t *testing.T) {
 	if okMgr || okStat {
 		t.Fatalf("expected cleanup")
 	}
+}
+
+func TestStartTransferDefaultInterval(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetGlobals()
+	req := models.TransferRequest{
+		Source:           models.ConnectionDetails{QueueManagerName: "qm1", ConnectionName: "c", Channel: "ch"},
+		SourceQueue:      "SQ",
+		Destination:      models.ConnectionDetails{QueueManagerName: "qm2", ConnectionName: "c", Channel: "ch"},
+		DestinationQueue: "DQ",
+	}
+	body, _ := json.Marshal(req)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/transfer", bytes.NewBuffer(body))
+	StartTransfer(c)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202")
+	}
+	var resp models.TransferResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	// cleanup
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Params = gin.Params{gin.Param{Key: "requestId", Value: resp.RequestID}}
+	CancelTransfer(c2)
 }

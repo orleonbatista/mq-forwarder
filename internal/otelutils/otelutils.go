@@ -32,6 +32,17 @@ type OTelConfig struct {
 	OTLPEndpoint   string
 }
 
+// Variables for testing error paths
+var (
+	FailResourceMerge     bool
+	FailExporter          bool
+	FailMsgCounter        bool
+	FailBytesCounter      bool
+	FailDurationHistogram bool
+	FailCommitCounter     bool
+	FailErrorCounter      bool
+)
+
 var (
 	mp      *sdkmetric.MeterProvider
 	metrics *MQMetrics
@@ -55,7 +66,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 			semconv.DeploymentEnvironment(config.Environment),
 		),
 	)
-	if err != nil {
+	if err != nil || FailResourceMerge {
 		return nil, fmt.Errorf("falha ao criar recurso: %v", err)
 	}
 
@@ -64,7 +75,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 		otlpmetricgrpc.WithEndpoint(config.OTLPEndpoint),
 		otlpmetricgrpc.WithInsecure(),
 	)
-	if err != nil {
+	if err != nil || FailExporter {
 		return nil, fmt.Errorf("falha ao criar exportador OTLP: %v", err)
 	}
 
@@ -103,7 +114,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 		metric.WithDescription("Número total de mensagens transferidas"),
 		metric.WithUnit("{messages}"),
 	)
-	if err != nil {
+	if err != nil || FailMsgCounter {
 		return nil, fmt.Errorf("falha ao criar contador de mensagens: %v", err)
 	}
 
@@ -112,7 +123,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 		metric.WithDescription("Número total de bytes transferidos"),
 		metric.WithUnit("By"),
 	)
-	if err != nil {
+	if err != nil || FailBytesCounter {
 		return nil, fmt.Errorf("falha ao criar contador de bytes: %v", err)
 	}
 
@@ -121,7 +132,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 		metric.WithDescription("Duração da transferência de mensagens"),
 		metric.WithUnit("ms"),
 	)
-	if err != nil {
+	if err != nil || FailDurationHistogram {
 		return nil, fmt.Errorf("falha ao criar histograma de duração: %v", err)
 	}
 
@@ -130,7 +141,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 		metric.WithDescription("Número total de commits realizados"),
 		metric.WithUnit("{commits}"),
 	)
-	if err != nil {
+	if err != nil || FailCommitCounter {
 		return nil, fmt.Errorf("falha ao criar contador de commits: %v", err)
 	}
 
@@ -139,7 +150,7 @@ func InitOTel(config OTelConfig) (*MQMetrics, error) {
 		metric.WithDescription("Número total de erros ocorridos"),
 		metric.WithUnit("{errors}"),
 	)
-	if err != nil {
+	if err != nil || FailErrorCounter {
 		return nil, fmt.Errorf("falha ao criar contador de erros: %v", err)
 	}
 
