@@ -88,3 +88,77 @@ func TestOpenQueueNotConnected(t *testing.T) {
 	}
 	ResetTestState()
 }
+
+func TestGetMessageSequence(t *testing.T) {
+	ResetTestState()
+	c := &MQConnection{}
+	Messages = []bool{false, true}
+	data, _, err := c.GetMessage(struct{}{}, nil)
+	if err != nil || data != nil {
+		t.Fatalf("expected nil msg on first call")
+	}
+	data, _, err = c.GetMessage(struct{}{}, nil)
+	if err != nil || data == nil {
+		t.Fatalf("expected message on second call")
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected zero-length data")
+	}
+}
+
+func TestGetMessageBufferAlloc(t *testing.T) {
+	ResetTestState()
+	c := &MQConnection{}
+	Messages = []bool{true}
+	var buf []byte
+	data, _, err := c.GetMessage(struct{}{}, buf)
+	if err != nil || data == nil {
+		t.Fatalf("unexpected error or nil data")
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected empty slice")
+	}
+}
+
+func TestCommitCalls(t *testing.T) {
+	ResetTestState()
+	c := &MQConnection{}
+	CommitCalls = 0
+	if err := c.Commit(); err != nil {
+		t.Fatalf("unexpected error")
+	}
+	if CommitCalls != 1 {
+		t.Fatalf("expected 1 commit call")
+	}
+	FailCommit = true
+	if err := c.Commit(); err == nil {
+		t.Fatalf("expected commit fail")
+	}
+	if CommitCalls != 2 {
+		t.Fatalf("expected second commit count")
+	}
+}
+
+func TestCommitFailCall(t *testing.T) {
+	ResetTestState()
+	c := &MQConnection{}
+	CommitCalls = 0
+	FailCommitCall = 1
+	if err := c.Commit(); err == nil {
+		t.Fatalf("expected fail by call")
+	}
+	if CommitCalls != 1 {
+		t.Fatalf("call count not 1")
+	}
+}
+
+func TestGetMessagePastEnd(t *testing.T) {
+	ResetTestState()
+	c := &MQConnection{}
+	Messages = []bool{true}
+	msgIndex = 1
+	data, _, err := c.GetMessage(struct{}{}, nil)
+	if err != nil || data != nil {
+		t.Fatalf("expected nil after end")
+	}
+}
