@@ -28,6 +28,86 @@ var statusTTL = 10 * time.Minute
 // status. It is exported as a variable to allow tests to speed up execution.
 var monitorInterval = time.Second
 
+func parseTransferRequest(c *gin.Context) (models.TransferRequest, bool) {
+	var req models.TransferRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.TransferResponse{
+			Status: transfer.StatusFailed,
+			Error:  "Erro ao processar requisição: " + err.Error(),
+		})
+		return models.TransferRequest{}, false
+	}
+	return req, true
+}
+
+func resolveBufferSize(size int) int {
+	if size > 0 {
+		return size
+	}
+	if bsEnv := os.Getenv("BUFFER_SIZE"); bsEnv != "" {
+		if v, err := strconv.Atoi(bsEnv); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 1048576
+}
+
+func resolveWorkerCount() int {
+	if wcEnv := os.Getenv("WORKER_COUNT"); wcEnv != "" {
+		if v, err := strconv.Atoi(wcEnv); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+func resolveCommitInterval(interval int) int {
+	if interval > 0 {
+		return interval
+	}
+	if ciEnv := os.Getenv("BATCH_SIZE"); ciEnv != "" {
+		if v, err := strconv.Atoi(ciEnv); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 10
+}
+
+func buildTransferOptions(req models.TransferRequest, commitInterval, workerCount int) transfer.TransferOptions {
+	return transfer.TransferOptions{
+		SourceConfig: mqutils.MQConnectionConfig{
+			QueueManagerName:    req.Source.QueueManagerName,
+			ConnectionName:      req.Source.ConnectionName,
+			Channel:             req.Source.Channel,
+			Username:            req.Source.Username,
+			Password:            req.Source.Password,
+			NonSharedConnection: req.NonSharedConnection,
+		},
+		SourceQueue: req.SourceQueue,
+		DestConfig: mqutils.MQConnectionConfig{
+			QueueManagerName: req.Destination.QueueManagerName,
+			ConnectionName:   req.Destination.ConnectionName,
+			Channel:          req.Destination.Channel,
+			Username:         req.Destination.Username,
+			Password:         req.Destination.Password,
+		},
+		DestQueue:           req.DestinationQueue,
+		BufferSize:          req.BufferSize,
+		CommitInterval:      commitInterval,
+		NonSharedConnection: req.NonSharedConnection,
+		WorkerCount:         workerCount,
+	}
+}
+
+func newTransferStatus(id string) models.TransferStatus {
+	return models.TransferStatus{
+		RequestID:           id,
+		Status:              transfer.StatusInProgress,
+		StartTime:           time.Now().UTC().Format(time.RFC3339),
+		MessagesTransferred: 0,
+	}
+}
+
 // @Summary Iniciar transferência de mensagens MQ
 // @Description Inicia uma transferência de mensagens de uma fila MQ para outra
 // @Tags transfer
@@ -39,80 +119,23 @@ var monitorInterval = time.Second
 // @Failure 500 {object} models.TransferResponse "Erro interno"
 // @Router /api/v1/transfer [post]
 func StartTransfer(c *gin.Context) {
-	var request models.TransferRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, models.TransferResponse{
-			Status: transfer.StatusFailed,
-			Error:  "Erro ao processar requisição: " + err.Error(),
-		})
+	request, ok := parseTransferRequest(c)
+	if !ok {
 		return
 	}
 
 	requestID := uuid.New().String()
 
-	if request.BufferSize <= 0 {
-		if bsEnv := os.Getenv("BUFFER_SIZE"); bsEnv != "" {
-			if v, err := strconv.Atoi(bsEnv); err == nil && v > 0 {
-				request.BufferSize = v
-			}
-		}
-	}
-	if request.BufferSize <= 0 {
-		request.BufferSize = 1048576
-	}
+	request.BufferSize = resolveBufferSize(request.BufferSize)
+	workerCount := resolveWorkerCount()
+	commitInterval := resolveCommitInterval(request.CommitInterval)
 
-	workerCount := 0
-	if wcEnv := os.Getenv("WORKER_COUNT"); wcEnv != "" {
-		if v, err := strconv.Atoi(wcEnv); err == nil && v > 0 {
-			workerCount = v
-		}
-	}
-
-	commitInterval := request.CommitInterval
-	if commitInterval <= 0 {
-		if ciEnv := os.Getenv("BATCH_SIZE"); ciEnv != "" {
-			if v, err := strconv.Atoi(ciEnv); err == nil && v > 0 {
-				commitInterval = v
-			}
-		}
-	}
-	if commitInterval <= 0 {
-		commitInterval = 10
-	}
-
-	options := transfer.TransferOptions{
-		SourceConfig: mqutils.MQConnectionConfig{
-			QueueManagerName:    request.Source.QueueManagerName,
-			ConnectionName:      request.Source.ConnectionName,
-			Channel:             request.Source.Channel,
-			Username:            request.Source.Username,
-			Password:            request.Source.Password,
-			NonSharedConnection: request.NonSharedConnection,
-		},
-		SourceQueue: request.SourceQueue,
-		DestConfig: mqutils.MQConnectionConfig{
-			QueueManagerName: request.Destination.QueueManagerName,
-			ConnectionName:   request.Destination.ConnectionName,
-			Channel:          request.Destination.Channel,
-			Username:         request.Destination.Username,
-			Password:         request.Destination.Password,
-		},
-		DestQueue:           request.DestinationQueue,
-		BufferSize:          request.BufferSize,
-		CommitInterval:      commitInterval,
-		NonSharedConnection: request.NonSharedConnection,
-		WorkerCount:         workerCount,
-	}
+	options := buildTransferOptions(request, commitInterval, workerCount)
 
 	transferMgr := transfer.NewTransferManager(options)
 	transferMgr.Start()
 
-	status := models.TransferStatus{
-		RequestID:           requestID,
-		Status:              transfer.StatusInProgress,
-		StartTime:           time.Now().UTC().Format(time.RFC3339),
-		MessagesTransferred: 0,
-	}
+	status := newTransferStatus(requestID)
 
 	statusMutex.Lock()
 	transferStatuses[requestID] = status

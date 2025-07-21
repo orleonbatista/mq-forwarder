@@ -174,21 +174,13 @@ func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc
 		return
 	}
 	defer srcConn.CloseQueue(srcQ)
-
 	buffer := make([]byte, tm.opts.BufferSize)
 	idle := 0
 	commitCounter := 0
 
 	for {
-		select {
-		case <-ctx.Done():
-			if tm.opts.CommitInterval > 0 && commitCounter > 0 {
-				_ = destConn.Commit()
-				_ = srcConn.Commit()
-			}
-			resultCh <- workerResult{}
+		if tm.handleContextDone(ctx, commitCounter, destConn, srcConn, resultCh) {
 			return
-		default:
 		}
 
 		start := time.Now()
@@ -199,45 +191,24 @@ func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc
 			return
 		}
 		if data == nil {
-			idle++
-			if idle >= 3 {
-				if tm.opts.CommitInterval > 0 && commitCounter > 0 {
-					_ = destConn.Commit()
-					_ = srcConn.Commit()
-				}
-				resultCh <- workerResult{}
-				return
-			}
-			select {
-			case <-time.After(time.Second):
-			case <-ctx.Done():
-				if tm.opts.CommitInterval > 0 && commitCounter > 0 {
-					_ = destConn.Commit()
-					_ = srcConn.Commit()
-				}
-				resultCh <- workerResult{}
+			if tm.handleIdle(ctx, &idle, &commitCounter, destConn, srcConn, resultCh) {
 				return
 			}
 			continue
 		}
 		idle = 0
 
-		bufCopy := tm.bufferPool.Get().([]byte)
-		if cap(bufCopy) < len(data) {
-			bufCopy = make([]byte, len(data))
-		}
-		cp := bufCopy[:len(data)]
-		copy(cp, data)
+		bufCopy := tm.copyBuffer(data)
 
-		if err := destConn.PutMessage(destQ, cp, md, "set"); err != nil {
+		if err := destConn.PutMessage(destQ, bufCopy, md, "set"); err != nil {
 			_ = srcConn.Backout()
 			_ = destConn.Backout()
-			tm.bufferPool.Put(cp[:cap(cp)])
+			tm.bufferPool.Put(bufCopy[:cap(bufCopy)])
 			resultCh <- workerResult{err: err}
 			cancel()
 			return
 		}
-		tm.bufferPool.Put(cp[:cap(cp)])
+		tm.bufferPool.Put(bufCopy[:cap(bufCopy)])
 
 		commitCounter++
 		atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
@@ -249,25 +220,77 @@ func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc
 			metrics.TransferDuration.Record(baseCtx, float64(time.Since(start).Milliseconds()))
 		}
 
-		if tm.opts.CommitInterval > 0 && commitCounter >= tm.opts.CommitInterval {
-			if err := destConn.Commit(); err != nil {
-				_ = srcConn.Backout()
-				_ = destConn.Backout()
-				resultCh <- workerResult{err: err}
-				cancel()
-				return
-			}
-			if err := srcConn.Commit(); err != nil {
-				resultCh <- workerResult{err: err}
-				cancel()
-				return
-			}
-			if metrics != nil {
-				metrics.CommitCounter.Add(baseCtx, 1)
-			}
-			commitCounter = 0
+		if tm.commitIfNeeded(&commitCounter, destConn, srcConn, metrics, baseCtx, resultCh, cancel) {
+			continue
 		}
 	}
+}
+
+func (tm *TransferManager) handleContextDone(ctx context.Context, commitCounter int, destConn, srcConn *mqutils.MQConnection, resultCh chan<- workerResult) bool {
+	select {
+	case <-ctx.Done():
+		tm.commitRemaining(commitCounter, destConn, srcConn)
+		resultCh <- workerResult{}
+		return true
+	default:
+		return false
+	}
+}
+
+func (tm *TransferManager) handleIdle(ctx context.Context, idle, commitCounter *int, destConn, srcConn *mqutils.MQConnection, resultCh chan<- workerResult) bool {
+	*idle++
+	if *idle >= 3 {
+		tm.commitRemaining(*commitCounter, destConn, srcConn)
+		resultCh <- workerResult{}
+		return true
+	}
+	select {
+	case <-time.After(time.Second):
+		return false
+	case <-ctx.Done():
+		tm.commitRemaining(*commitCounter, destConn, srcConn)
+		resultCh <- workerResult{}
+		return true
+	}
+}
+
+func (tm *TransferManager) commitRemaining(count int, destConn, srcConn *mqutils.MQConnection) {
+	if tm.opts.CommitInterval > 0 && count > 0 {
+		_ = destConn.Commit()
+		_ = srcConn.Commit()
+	}
+}
+
+func (tm *TransferManager) commitIfNeeded(count *int, destConn, srcConn *mqutils.MQConnection, metrics *otelutils.MQMetrics, baseCtx context.Context, resultCh chan<- workerResult, cancel context.CancelFunc) bool {
+	if tm.opts.CommitInterval > 0 && *count >= tm.opts.CommitInterval {
+		if err := destConn.Commit(); err != nil {
+			_ = srcConn.Backout()
+			_ = destConn.Backout()
+			resultCh <- workerResult{err: err}
+			cancel()
+			return true
+		}
+		if err := srcConn.Commit(); err != nil {
+			resultCh <- workerResult{err: err}
+			cancel()
+			return true
+		}
+		if metrics != nil {
+			metrics.CommitCounter.Add(baseCtx, 1)
+		}
+		*count = 0
+	}
+	return false
+}
+
+func (tm *TransferManager) copyBuffer(data []byte) []byte {
+	bufCopy := tm.bufferPool.Get().([]byte)
+	if cap(bufCopy) < len(data) {
+		bufCopy = make([]byte, len(data))
+	}
+	cp := bufCopy[:len(data)]
+	copy(cp, data)
+	return cp
 }
 
 func (tm *TransferManager) finishWithError(status string, err error) {
