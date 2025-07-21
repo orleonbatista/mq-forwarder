@@ -8,6 +8,8 @@ import (
 	"github.com/ibm-messaging/mq-golang/v5/ibmmq"
 )
 
+const errNotConnected = "não conectado ao Queue Manager"
+
 // MQConnectionConfig contém os parâmetros de conexão para um Queue Manager MQ
 type MQConnectionConfig struct {
 	QueueManagerName    string
@@ -77,7 +79,7 @@ func (conn *MQConnection) Disconnect() error {
 // OpenQueue abre uma fila MQ para leitura ou escrita
 func (conn *MQConnection) OpenQueue(queueName string, forInput bool, nonShared bool) (ibmmq.MQObject, error) {
 	if !conn.IsConnected {
-		return ibmmq.MQObject{}, fmt.Errorf("não conectado ao Queue Manager")
+		return ibmmq.MQObject{}, fmt.Errorf(errNotConnected)
 	}
 
 	var openOptions int32
@@ -173,7 +175,7 @@ func (conn *MQConnection) PutMessage(queue ibmmq.MQObject, data []byte, md inter
 // Commit realiza um commit da transação atual
 func (conn *MQConnection) Commit() error {
 	if !conn.IsConnected {
-		return fmt.Errorf("não conectado ao Queue Manager")
+		return fmt.Errorf(errNotConnected)
 	}
 
 	err := conn.QMgr.Cmit()
@@ -187,7 +189,7 @@ func (conn *MQConnection) Commit() error {
 // Backout realiza um backout da transação atual
 func (conn *MQConnection) Backout() error {
 	if !conn.IsConnected {
-		return fmt.Errorf("não conectado ao Queue Manager")
+		return fmt.Errorf(errNotConnected)
 	}
 
 	err := conn.QMgr.Back()
