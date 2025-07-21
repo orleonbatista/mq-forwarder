@@ -17,6 +17,13 @@ import (
 	"mq-transfer-go/internal/otelutils"
 )
 
+var logFatalf = log.Fatalf
+var serverAddr = ":8080"
+var serverShutdown = func(srv *http.Server, ctx context.Context) error {
+	return srv.Shutdown(ctx)
+}
+var otelInit = otelutils.InitOTel
+
 // @title MQ Transfer API
 // @version 1.0
 // @description API para transferência de mensagens entre filas IBM MQ
@@ -39,7 +46,7 @@ func main() {
 	if otelConfig.Environment == "" {
 		otelConfig.Environment = "development"
 	}
-	_, err := otelutils.InitOTel(otelConfig)
+	_, err := otelInit(otelConfig)
 	if err != nil {
 		log.Printf("Aviso: Falha ao inicializar OpenTelemetry: %v. Continuando sem telemetria.", err)
 	}
@@ -58,26 +65,26 @@ func main() {
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    serverAddr,
 		Handler: r,
 	}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Falha ao iniciar o servidor: %v", err)
+			logFatalf("Falha ao iniciar o servidor: %v", err)
 		}
 	}()
 
-	log.Println("Servidor iniciado na porta 8080")
-	log.Println("Documentação Swagger disponível em: http://localhost:8080/swagger/index.html")
+	log.Println("Servidor iniciado na porta", serverAddr)
+	log.Println("Documentação Swagger disponível em: http://localhost" + serverAddr + "/swagger/index.html")
 
 	<-ctx.Done()
 	log.Println("Desligando servidor...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Erro ao desligar o servidor: %v", err)
+	if err := serverShutdown(srv, shutdownCtx); err != nil {
+		logFatalf("Erro ao desligar o servidor: %v", err)
 	}
 
 	otelutils.Shutdown(shutdownCtx)
