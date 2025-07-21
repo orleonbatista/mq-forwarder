@@ -25,3 +25,47 @@ func TestInitOTelWithEndpoint(t *testing.T) {
 	}
 	Shutdown(context.Background())
 }
+
+func TestInitOTelFailures(t *testing.T) {
+	FailResourceMerge = true
+	if _, err := InitOTel(OTelConfig{OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected resource error")
+	}
+	FailResourceMerge = false
+
+	FailExporter = true
+	if _, err := InitOTel(OTelConfig{OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected exporter error")
+	}
+	FailExporter = false
+
+	FailMsgCounter = true
+	if _, err := InitOTel(OTelConfig{ServiceName: "s", ServiceVersion: "v", Environment: "e", OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected msg counter error")
+	}
+	FailMsgCounter = false
+
+	FailBytesCounter = true
+	if _, err := InitOTel(OTelConfig{ServiceName: "s", ServiceVersion: "v", Environment: "e", OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected bytes counter error")
+	}
+	FailBytesCounter = false
+
+	FailDurationHistogram = true
+	if _, err := InitOTel(OTelConfig{ServiceName: "s", ServiceVersion: "v", Environment: "e", OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected duration histogram error")
+	}
+	FailDurationHistogram = false
+
+	FailCommitCounter = true
+	if _, err := InitOTel(OTelConfig{ServiceName: "s", ServiceVersion: "v", Environment: "e", OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected commit counter error")
+	}
+	FailCommitCounter = false
+
+	FailErrorCounter = true
+	if _, err := InitOTel(OTelConfig{ServiceName: "s", ServiceVersion: "v", Environment: "e", OTLPEndpoint: "x"}); err == nil {
+		t.Fatalf("expected error counter error")
+	}
+	FailErrorCounter = false
+}
