@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	_ "mq-transfer-go/api/docs"
+	docs "mq-transfer-go/api/docs"
 	"mq-transfer-go/api/handlers"
 	"mq-transfer-go/internal/otelutils"
 )
@@ -54,6 +54,8 @@ func main() {
 	defer stop()
 
 	r := gin.Default()
+	// Use empty host so swagger calls the same host that served the docs
+	docs.SwaggerInfo.Host = ""
 	v1 := r.Group("/api/v1")
 	{
 		v1.POST("/transfer", handlers.StartTransfer)
@@ -76,7 +78,7 @@ func main() {
 	}()
 
 	log.Println("Servidor iniciado na porta", serverAddr)
-	log.Println("Documentação Swagger disponível em: http://localhost" + serverAddr + "/swagger/index.html")
+	log.Println("Documentação Swagger disponível em: /swagger/index.html")
 
 	<-ctx.Done()
 	log.Println("Desligando servidor...")

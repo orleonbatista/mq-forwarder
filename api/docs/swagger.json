@@ -18,7 +18,7 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8080",
+    "host": "",
     "basePath": "/",
     "paths": {
         "/api/v1/health": {
@@ -228,6 +228,10 @@
                 "version": {
                     "type": "string",
                     "example": "1.0.0"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2025-06-04T00:15:30Z"
                 }
             }
         },

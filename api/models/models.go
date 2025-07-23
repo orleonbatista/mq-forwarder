@@ -43,6 +43,7 @@ type TransferStatus struct {
 
 // HealthResponse representa a resposta do endpoint de health check
 type HealthResponse struct {
-	Status  string `json:"status" example:"ok" swaggertype:"string"`
-	Version string `json:"version" example:"1.0.0" swaggertype:"string"`
+	Status    string `json:"status" example:"ok" swaggertype:"string"`
+	Version   string `json:"version" example:"1.0.0" swaggertype:"string"`
+	Timestamp string `json:"timestamp" example:"2025-06-04T00:15:30Z" swaggertype:"string"`
 }
