@@ -30,6 +30,9 @@ definitions:
       version:
         example: 1.0.0
         type: string
+      timestamp:
+        example: 2025-06-04T00:15:30Z
+        type: string
     type: object
   models.TransferRequest:
     properties:
@@ -103,7 +106,7 @@ definitions:
         example: in_progress
         type: string
     type: object
-host: localhost:8080
+host: ""
 info:
   contact:
     email: support@example.com

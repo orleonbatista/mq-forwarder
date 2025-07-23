@@ -15,8 +15,6 @@ import (
 // @Success 200 {object} models.HealthResponse
 // @Router /api/v1/health [get]
 func HealthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, models.HealthResponse{
-		Status:  "ok",
-		Version: "1.0.0",
-	})
+	resp := models.NewHealthResponse("ok", "1.0.0")
+	c.JSON(http.StatusOK, resp)
 }

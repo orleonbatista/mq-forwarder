@@ -231,6 +231,10 @@ const docTemplate = `{
                 "version": {
                     "type": "string",
                     "example": "1.0.0"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2025-06-04T00:15:30Z"
                 }
             }
         },
@@ -338,8 +342,10 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
-	Host:             "localhost:8080",
+	Version: "1.0",
+	// Host is left empty so Swagger UI uses the host serving the docs,
+	// allowing the API to work behind any DNS or load balancer.
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http"},
 	Title:            "MQ Transfer API",
