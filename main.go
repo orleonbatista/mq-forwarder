@@ -55,7 +55,7 @@ func main() {
 
 	r := gin.Default()
 	// Use empty host so swagger calls the same host that served the docs
-	docs.SwaggerInfo.Host = ""
+	docs.OpenAPIInfo.Host = ""
 	v1 := r.Group("/api/v1")
 	{
 		v1.POST("/transfer", handlers.StartTransfer)

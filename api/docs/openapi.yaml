@@ -1,0 +1,242 @@
+openapi: 3.0.0
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+    url: http://www.example.com/support
+  description: API para transferência de mensagens entre filas IBM MQ
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: MQ Transfer API
+  version: "1.0"
+paths:
+  /api/v1/health:
+    get:
+      description: Retorna informacoes de saude da aplicacao
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.HealthResponse"
+      summary: Health Check
+      tags:
+        - health
+  /api/v1/transfer:
+    post:
+      description: Inicia uma transferência de mensagens de uma fila MQ para outra
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/models.TransferRequest"
+        description: Detalhes da transferência
+        required: true
+      responses:
+        "202":
+          description: Transferência iniciada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+        "400":
+          description: Erro na requisição
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+        "500":
+          description: Erro interno
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+      summary: Iniciar transferência de mensagens MQ
+      tags:
+        - transfer
+  "/api/v1/transfer/{requestId}":
+    get:
+      description: Retorna o status atual de uma transferência de mensagens
+      parameters:
+        - description: ID da requisição de transferência
+          in: path
+          name: requestId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Status da transferência
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferStatus"
+        "404":
+          description: Transferência não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+      summary: Obter status da transferência
+      tags:
+        - transfer
+  "/api/v1/transfer/{requestId}/cancel":
+    post:
+      description: Cancela uma transferência de mensagens que está em andamento
+      parameters:
+        - description: ID da requisição de transferência
+          in: path
+          name: requestId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transferência cancelada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+        "400":
+          description: Transferência já concluída
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+        "404":
+          description: Transferência não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/models.TransferResponse"
+      summary: Cancelar uma transferência em andamento
+      tags:
+        - transfer
+  /api/v1/transfers:
+    get:
+      description: Retorna uma lista com todas as transferências e seus status
+      responses:
+        "200":
+          description: Lista de transferências
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/models.TransferStatus"
+                type: array
+      summary: Listar todas as transferências
+      tags:
+        - transfer
+servers:
+  - url: /
+components:
+  schemas:
+    models.ConnectionDetails:
+      properties:
+        channel:
+          example: SYSTEM.DEF.SVRCONN
+          type: string
+        connectionName:
+          example: localhost(1414)
+          type: string
+        password:
+          example: mqpassword
+          type: string
+        queueManagerName:
+          example: QM1
+          type: string
+        username:
+          example: mquser
+          type: string
+      required:
+        - channel
+        - connectionName
+        - queueManagerName
+      type: object
+    models.HealthResponse:
+      properties:
+        status:
+          example: ok
+          type: string
+        version:
+          example: 1.0.0
+          type: string
+        timestamp:
+          example: 2025-06-04T00:15:30Z
+          type: string
+      type: object
+    models.TransferRequest:
+      properties:
+        bufferSize:
+          example: 1048576
+          type: integer
+        commitInterval:
+          example: 10
+          type: integer
+        destination:
+          $ref: "#/components/schemas/models.ConnectionDetails"
+        destinationQueue:
+          example: DEST.QUEUE
+          type: string
+        nonSharedConnection:
+          example: false
+          type: boolean
+        source:
+          $ref: "#/components/schemas/models.ConnectionDetails"
+        sourceQueue:
+          example: SOURCE.QUEUE
+          type: string
+      required:
+        - destination
+        - destinationQueue
+        - source
+        - sourceQueue
+      type: object
+    models.TransferResponse:
+      properties:
+        error:
+          example: Failed to connect to source queue manager
+          type: string
+        messagesTotal:
+          example: 1000
+          type: integer
+        messagesTransferred:
+          example: 500
+          type: integer
+        requestId:
+          example: 550e8400-e29b-41d4-a716-446655440000
+          type: string
+        status:
+          example: in_progress
+          type: string
+      type: object
+    models.TransferStatus:
+      properties:
+        bytesTransferred:
+          example: 1048576
+          type: integer
+        endTime:
+          example: 2025-06-04T00:16:45Z
+          type: string
+        error:
+          example: Failed to connect to source queue manager
+          type: string
+        messagesTotal:
+          example: 1000
+          type: integer
+        messagesTransferred:
+          example: 500
+          type: integer
+        requestId:
+          example: 550e8400-e29b-41d4-a716-446655440000
+          type: string
+        startTime:
+          example: 2025-06-04T00:15:30Z
+          type: string
+        status:
+          example: in_progress
+          type: string
+      type: object
