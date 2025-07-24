@@ -7,7 +7,7 @@ import (
 )
 
 func TestDocsInit(t *testing.T) {
-	if docs.SwaggerInfo == nil {
-		t.Fatal("SwaggerInfo should not be nil")
+	if docs.OpenAPIInfo == nil {
+		t.Fatal("OpenAPIInfo should not be nil")
 	}
 }

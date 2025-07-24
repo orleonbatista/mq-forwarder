@@ -93,5 +93,5 @@ Retorna o status de saúde e a versão atual da aplicação.
 
 A aplicação exporta métricas como `mq_messages_transferred`, `mq_bytes_transferred`, `mq_transfer_duration`, `mq_commits` e `mq_errors`, permitindo monitorar o progresso e eventuais falhas.
 
-A documentação Swagger gerada automaticamente pode ser acessada em `/swagger/index.html` quando o servidor está em execução.
+A documentação OpenAPI gerada automaticamente pode ser acessada em `/swagger/index.html` quando o servidor está em execução.
 

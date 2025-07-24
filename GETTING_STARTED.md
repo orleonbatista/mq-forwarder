@@ -34,7 +34,7 @@ go run -tags ibmmq main.go
 ## Uso da API
 
 Após iniciar o servidor, a API estará disponível em `http://localhost:8080`.
-A documentação Swagger pode ser acessada em `http://localhost:8080/swagger/index.html`.
+A documentação OpenAPI pode ser acessada em `http://localhost:8080/swagger/index.html`.
 
 ### Iniciar transferência
 
