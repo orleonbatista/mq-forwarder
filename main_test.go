@@ -15,6 +15,7 @@ import (
 
 func TestMainFunction(t *testing.T) {
 	os.Setenv("OTLP_ENDPOINT", "")
+	os.Setenv("DB_PATH", ":memory:")
 	otelInit = func(otelutils.OTelConfig) (*otelutils.MQMetrics, error) {
 		return nil, errors.New("init")
 	}
@@ -60,6 +61,7 @@ func TestMainFunction(t *testing.T) {
 
 func TestMainListenError(t *testing.T) {
 	os.Setenv("OTLP_ENDPOINT", "")
+	os.Setenv("DB_PATH", ":memory:")
 	serverAddr = ":18081"
 	ln, err := net.Listen("tcp", serverAddr)
 	if err != nil {

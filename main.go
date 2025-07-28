@@ -9,12 +9,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	docs "mq-transfer-go/api/docs"
 	"mq-transfer-go/api/handlers"
 	"mq-transfer-go/internal/otelutils"
+	"mq-transfer-go/transferstore"
+	dynamostore "mq-transfer-go/transferstore/dynamo"
+	sqlitestore "mq-transfer-go/transferstore/sqlite"
 )
 
 var logFatalf = log.Fatalf
@@ -50,6 +55,26 @@ func main() {
 	if err != nil {
 		log.Printf("Aviso: Falha ao inicializar OpenTelemetry: %v. Continuando sem telemetria.", err)
 	}
+
+	var store transferstore.TransferStore
+	if os.Getenv("USE_DYNAMO") == "true" {
+		cfg, err := config.LoadDefaultConfig(context.Background())
+		if err != nil {
+			logFatalf("falha ao carregar config AWS: %v", err)
+		}
+		store = dynamostore.NewDynamoStore(dynamodb.NewFromConfig(cfg), "transfer_requests")
+	} else {
+		var err error
+		path := os.Getenv("DB_PATH")
+		if path == "" {
+			path = "/data/transfer.db"
+		}
+		store, err = sqlitestore.NewSQLiteStore(path)
+		if err != nil {
+			logFatalf("falha ao inicializar sqlite: %v", err)
+		}
+	}
+	_ = store // exemplo de uso, handlers usariam essa variável
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
