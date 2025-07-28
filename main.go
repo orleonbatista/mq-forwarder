@@ -74,7 +74,7 @@ func main() {
 			logFatalf("falha ao inicializar sqlite: %v", err)
 		}
 	}
-	_ = store // exemplo de uso, handlers usariam essa variável
+	handler := handlers.NewTransferHandler(store)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -83,10 +83,10 @@ func main() {
 	docs.OpenAPIInfo.Host = ""
 	v1 := r.Group("/api/v1")
 	{
-		v1.POST("/transfer", handlers.StartTransfer)
-		v1.GET("/transfer/:requestId", handlers.GetTransferStatus)
-		v1.GET("/transfers", handlers.ListTransfers)
-		v1.POST("/transfer/:requestId/cancel", handlers.CancelTransfer)
+		v1.POST("/transfer", handler.StartTransfer)
+		v1.GET("/transfer/:requestId", handler.GetTransferStatus)
+		v1.GET("/transfers", handler.ListTransfers)
+		v1.POST("/transfer/:requestId/cancel", handler.CancelTransfer)
 		v1.GET("/health", handlers.HealthCheck)
 	}
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
