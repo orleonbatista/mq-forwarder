@@ -67,10 +67,10 @@ func (s *SQLiteStore) GetByID(id string) (transferstore.TransferRequest, error) 
         non_shared_connection, source_queue, destination_queue, source_connection,
         destination_connection FROM transfer_requests WHERE request_id = ?`, id)
 	var req transferstore.TransferRequest
-	var start, end sql.NullString
+	var start, end, errMsg sql.NullString
 	var srcJSON, destJSON string
 	if err := row.Scan(&req.RequestID, &req.Status, &start, &end, &req.MessagesTotal,
-		&req.MessagesTransferred, &req.BytesTransferred, &req.Error, &req.BufferSize,
+		&req.MessagesTransferred, &req.BytesTransferred, &errMsg, &req.BufferSize,
 		&req.CommitInterval, &req.NonSharedConnection, &req.SourceQueue, &req.DestinationQueue,
 		&srcJSON, &destJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -83,6 +83,7 @@ func (s *SQLiteStore) GetByID(id string) (transferstore.TransferRequest, error) 
 		t, _ := time.Parse(time.RFC3339, end.String)
 		req.EndTime = &t
 	}
+	req.Error = errMsg.String
 	_ = json.Unmarshal([]byte(srcJSON), &req.SourceConnection)
 	_ = json.Unmarshal([]byte(destJSON), &req.DestinationConnection)
 	return req, nil
@@ -116,10 +117,10 @@ func (s *SQLiteStore) List() ([]transferstore.TransferRequest, error) {
 	var results []transferstore.TransferRequest
 	for rows.Next() {
 		var req transferstore.TransferRequest
-		var start, end sql.NullString
+		var start, end, errMsg sql.NullString
 		var srcJSON, destJSON string
 		if err := rows.Scan(&req.RequestID, &req.Status, &start, &end, &req.MessagesTotal,
-			&req.MessagesTransferred, &req.BytesTransferred, &req.Error, &req.BufferSize,
+			&req.MessagesTransferred, &req.BytesTransferred, &errMsg, &req.BufferSize,
 			&req.CommitInterval, &req.NonSharedConnection, &req.SourceQueue, &req.DestinationQueue,
 			&srcJSON, &destJSON); err != nil {
 			return nil, err
@@ -129,6 +130,7 @@ func (s *SQLiteStore) List() ([]transferstore.TransferRequest, error) {
 			t, _ := time.Parse(time.RFC3339, end.String)
 			req.EndTime = &t
 		}
+		req.Error = errMsg.String
 		_ = json.Unmarshal([]byte(srcJSON), &req.SourceConnection)
 		_ = json.Unmarshal([]byte(destJSON), &req.DestinationConnection)
 		results = append(results, req)
