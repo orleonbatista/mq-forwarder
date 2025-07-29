@@ -123,6 +123,10 @@ func TestDynamoStore(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v %v", len(list), err)
 	}
+
+	if err := store.Ping(); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
 }
 
 func TestDynamoStoreErrors(t *testing.T) {
@@ -143,5 +147,9 @@ func TestDynamoStoreErrors(t *testing.T) {
 	}
 	if _, err := store.List(); err == nil {
 		t.Fatal("expected error")
+	}
+
+	if err := store.Ping(); err == nil {
+		t.Fatal("expected ping error")
 	}
 }

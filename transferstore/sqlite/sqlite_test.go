@@ -65,4 +65,12 @@ func TestSQLiteStore(t *testing.T) {
 	if v := nilIfTime(&end); v == nil {
 		t.Fatalf("nilIfTime value")
 	}
+
+	if err := store.Ping(); err != nil {
+		t.Fatalf("ping failed: %v", err)
+	}
+	store.db.Close()
+	if err := store.Ping(); err == nil {
+		t.Fatalf("expected ping error after close")
+	}
 }

@@ -113,3 +113,10 @@ func (d *DynamoStore) List() ([]transferstore.TransferRequest, error) {
 	}
 	return reqs, nil
 }
+
+// Ping verifies connectivity with DynamoDB by performing a lightweight scan.
+func (d *DynamoStore) Ping() error {
+	limit := int32(1)
+	_, err := d.client.Scan(context.Background(), &dynamodb.ScanInput{TableName: &d.table, Limit: &limit})
+	return err
+}
