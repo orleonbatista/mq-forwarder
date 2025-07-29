@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"mq-transfer-go/api/models"
-	sqlitestore "mq-transfer-go/transferstore/sqlite"
+	"mq-forwarder-go/api/models"
+	sqlitestore "mq-forwarder-go/transferstore/sqlite"
 )
 
 func TestIntegrationSQLite(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"mq-transfer-go/transferstore"
+	"mq-forwarder-go/transferstore"
 )
 
 func TestSQLiteStore(t *testing.T) {

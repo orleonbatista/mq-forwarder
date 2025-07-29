@@ -11,10 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang/mock/gomock"
-	"mq-transfer-go/api/models"
-	"mq-transfer-go/internal/transfer"
-	"mq-transfer-go/transferstore"
-	mockstore "mq-transfer-go/transferstore/mock_transferstore"
+	"mq-forwarder-go/api/models"
+	"mq-forwarder-go/internal/transfer"
+	"mq-forwarder-go/transferstore"
+	mockstore "mq-forwarder-go/transferstore/mock_transferstore"
 )
 
 func newMockHandler(t *testing.T) (*TransferHandler, *mockstore.MockTransferStore, *gomock.Controller) {

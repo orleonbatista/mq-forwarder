@@ -3,7 +3,7 @@ package docs_test
 import (
 	"testing"
 
-	"mq-transfer-go/api/docs"
+	"mq-forwarder-go/api/docs"
 )
 
 func TestDocsInit(t *testing.T) {

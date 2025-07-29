@@ -11,10 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"mq-transfer-go/api/models"
-	"mq-transfer-go/internal/mqutils"
-	"mq-transfer-go/internal/transfer"
-	"mq-transfer-go/transferstore"
+	"mq-forwarder-go/api/models"
+	"mq-forwarder-go/internal/mqutils"
+	"mq-forwarder-go/internal/transfer"
+	"mq-forwarder-go/transferstore"
 )
 
 // TransferHandler holds dependencies for transfer related endpoints.

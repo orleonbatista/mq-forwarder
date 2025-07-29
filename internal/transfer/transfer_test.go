@@ -8,10 +8,7 @@ import (
 	"testing"
 	"time"
 
-	metricnoop "go.opentelemetry.io/otel/metric/noop"
-
-	"mq-transfer-go/internal/mqutils"
-	"mq-transfer-go/internal/otelutils"
+	"mq-forwarder-go/internal/mqutils"
 )
 
 func TestTransferCancel(t *testing.T) {
@@ -50,7 +47,7 @@ func TestWorkerCancel(t *testing.T) {
 	var wg sync.WaitGroup
 	ch := make(chan workerResult, 2)
 	wg.Add(1)
-	go tm.worker(ctx, cancel, &wg, ch, context.Background(), nil)
+	go tm.worker(ctx, cancel, &wg, ch)
 	time.Sleep(2 * time.Millisecond)
 	cancel()
 	wg.Wait()
@@ -64,7 +61,7 @@ func TestWorkerIdleExit(t *testing.T) {
 	var wg sync.WaitGroup
 	ch := make(chan workerResult, 2)
 	wg.Add(1)
-	go tm.worker(ctx, cancel, &wg, ch, context.Background(), nil)
+	go tm.worker(ctx, cancel, &wg, ch)
 	wg.Wait()
 }
 
@@ -74,7 +71,7 @@ func runWorker(opts TransferOptions) error {
 	var wg sync.WaitGroup
 	ch := make(chan workerResult, 2)
 	wg.Add(1)
-	go tm.worker(ctx, cancel, &wg, ch, context.Background(), nil)
+	go tm.worker(ctx, cancel, &wg, ch)
 	time.Sleep(time.Millisecond)
 	cancel()
 	wg.Wait()
@@ -88,7 +85,7 @@ func runWorkerSeq(opts TransferOptions, msgs []bool) error {
 	var wg sync.WaitGroup
 	ch := make(chan workerResult, 2)
 	wg.Add(1)
-	go tm.worker(ctx, cancel, &wg, ch, context.Background(), nil)
+	go tm.worker(ctx, cancel, &wg, ch)
 	wg.Wait()
 	return (<-ch).err
 }
@@ -173,14 +170,10 @@ func TestCommitIfNeeded(t *testing.T) {
 	src := &mqutils.MQConnection{}
 	count := 1
 	ch := make(chan workerResult, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	metrics := &otelutils.MQMetrics{}
-	m := metricnoop.NewMeterProvider().Meter("m")
-	c, _ := m.Int64Counter("c")
-	metrics.CommitCounter = c
+	_, cancel := context.WithCancel(context.Background())
 
 	mqutils.FailCommitCall = 1
-	if !tm.commitIfNeeded(&count, dest, src, metrics, ctx, ch, cancel) {
+	if !tm.commitIfNeeded(&count, dest, src, ch, cancel) {
 		t.Fatalf("expected true")
 	}
 	if (<-ch).err == nil {
@@ -190,7 +183,7 @@ func TestCommitIfNeeded(t *testing.T) {
 	mqutils.ResetTestState()
 	mqutils.FailCommitCall = 2
 	count = 1
-	if !tm.commitIfNeeded(&count, dest, src, metrics, ctx, ch, cancel) {
+	if !tm.commitIfNeeded(&count, dest, src, ch, cancel) {
 		t.Fatalf("expected true for src fail")
 	}
 	if (<-ch).err == nil {
@@ -199,7 +192,7 @@ func TestCommitIfNeeded(t *testing.T) {
 
 	mqutils.ResetTestState()
 	count = 1
-	if tm.commitIfNeeded(&count, dest, src, metrics, ctx, ch, cancel) {
+	if tm.commitIfNeeded(&count, dest, src, ch, cancel) {
 		t.Fatalf("unexpected true")
 	}
 	if count != 0 {
@@ -280,26 +273,6 @@ func TestHandleIdleBranches(t *testing.T) {
 	if time.Since(start) < time.Second {
 		t.Fatalf("sleep not executed")
 	}
-}
-
-func TestWorkerWithMetrics(t *testing.T) {
-	mqutils.ResetTestState()
-	tm := NewTransferManager(TransferOptions{CommitInterval: 1, BufferSize: 1})
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	ch := make(chan workerResult, 2)
-	wg.Add(1)
-	m := metricnoop.NewMeterProvider().Meter("m")
-	msgC, _ := m.Int64Counter("msg")
-	byteC, _ := m.Int64Counter("bytes")
-	dur, _ := m.Float64Histogram("dur")
-	commitC, _ := m.Int64Counter("commit")
-	metrics := &otelutils.MQMetrics{MessagesTransferred: msgC, BytesTransferred: byteC, TransferDuration: dur, CommitCounter: commitC}
-	go tm.worker(ctx, cancel, &wg, ch, context.Background(), metrics)
-	time.Sleep(2 * time.Millisecond)
-	cancel()
-	wg.Wait()
-	<-ch
 }
 
 func TestSetStatsForTest(t *testing.T) {

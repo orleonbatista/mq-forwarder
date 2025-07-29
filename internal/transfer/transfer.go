@@ -7,8 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mq-transfer-go/internal/mqutils"
-	"mq-transfer-go/internal/otelutils"
+	"mq-forwarder-go/internal/mqutils"
 )
 
 // Predefined transfer statuses to avoid typos and allow consistent checks.
@@ -94,9 +93,7 @@ func (tm *TransferManager) run() {
 	tm.mu.Unlock()
 	defer close(tm.done)
 
-	metrics := otelutils.GetMetrics()
-	baseCtx := context.Background()
-	ctx, cancel := context.WithCancel(baseCtx)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -104,7 +101,7 @@ func (tm *TransferManager) run() {
 
 	for i := 0; i < tm.opts.WorkerCount; i++ {
 		wg.Add(1)
-		go tm.worker(ctx, cancel, &wg, resultCh, baseCtx, metrics)
+		go tm.worker(ctx, cancel, &wg, resultCh)
 	}
 
 	go func() {
@@ -140,7 +137,7 @@ func (tm *TransferManager) run() {
 	}
 }
 
-func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, resultCh chan<- workerResult, baseCtx context.Context, metrics *otelutils.MQMetrics) {
+func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, resultCh chan<- workerResult) {
 	defer wg.Done()
 
 	srcConn := mqutils.NewMQConnection(tm.opts.SourceConfig)
@@ -183,7 +180,6 @@ func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc
 			return
 		}
 
-		start := time.Now()
 		data, md, err := srcConn.GetMessage(srcQ, buffer)
 		if err != nil {
 			resultCh <- workerResult{err: err}
@@ -214,13 +210,7 @@ func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc
 		atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
 		atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(data)))
 
-		if metrics != nil {
-			metrics.MessagesTransferred.Add(baseCtx, 1)
-			metrics.BytesTransferred.Add(baseCtx, int64(len(data)))
-			metrics.TransferDuration.Record(baseCtx, float64(time.Since(start).Milliseconds()))
-		}
-
-		if tm.commitIfNeeded(&commitCounter, destConn, srcConn, metrics, baseCtx, resultCh, cancel) {
+		if tm.commitIfNeeded(&commitCounter, destConn, srcConn, resultCh, cancel) {
 			continue
 		}
 	}
@@ -261,7 +251,7 @@ func (tm *TransferManager) commitRemaining(count int, destConn, srcConn *mqutils
 	}
 }
 
-func (tm *TransferManager) commitIfNeeded(count *int, destConn, srcConn *mqutils.MQConnection, metrics *otelutils.MQMetrics, baseCtx context.Context, resultCh chan<- workerResult, cancel context.CancelFunc) bool {
+func (tm *TransferManager) commitIfNeeded(count *int, destConn, srcConn *mqutils.MQConnection, resultCh chan<- workerResult, cancel context.CancelFunc) bool {
 	if tm.opts.CommitInterval > 0 && *count >= tm.opts.CommitInterval {
 		if err := destConn.Commit(); err != nil {
 			_ = srcConn.Backout()
@@ -274,9 +264,6 @@ func (tm *TransferManager) commitIfNeeded(count *int, destConn, srcConn *mqutils
 			resultCh <- workerResult{err: err}
 			cancel()
 			return true
-		}
-		if metrics != nil {
-			metrics.CommitCounter.Add(baseCtx, 1)
 		}
 		*count = 0
 	}
