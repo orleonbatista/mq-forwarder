@@ -83,17 +83,26 @@ func NewTransferManager(opts TransferOptions) *TransferManager {
 }
 
 // Start begins the transfer asynchronously.
+// Start begins the transfer asynchronously using a background context.
 func (tm *TransferManager) Start() {
-	go tm.run()
+	tm.StartContext(context.Background())
 }
 
-func (tm *TransferManager) run() {
+// StartContext begins the transfer using the provided parent context.
+func (tm *TransferManager) StartContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go tm.run(ctx)
+}
+
+func (tm *TransferManager) run(parent context.Context) {
 	tm.mu.Lock()
 	tm.stats.Status = StatusInProgress
 	tm.mu.Unlock()
 	defer close(tm.done)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -105,8 +114,12 @@ func (tm *TransferManager) run() {
 	}
 
 	go func() {
-		<-tm.quit
-		cancel()
+		select {
+		case <-tm.quit:
+			cancel()
+		case <-parent.Done():
+			cancel()
+		}
 	}()
 
 	wg.Wait()

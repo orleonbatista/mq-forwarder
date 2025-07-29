@@ -20,13 +20,12 @@ import (
 // TransferHandler holds dependencies for transfer related endpoints.
 type TransferHandler struct {
 	store    transferstore.TransferStore
-	managers map[string]*transfer.TransferManager
-	mu       *sync.RWMutex
+	managers sync.Map // key string -> *transfer.TransferManager
 }
 
 // NewTransferHandler creates a new handler with the given store.
 func NewTransferHandler(s transferstore.TransferStore) *TransferHandler {
-	return &TransferHandler{store: s, managers: make(map[string]*transfer.TransferManager), mu: &sync.RWMutex{}}
+	return &TransferHandler{store: s}
 }
 
 // monitorInterval controls how often the monitor goroutine checks transfer status.
@@ -182,9 +181,7 @@ func (h *TransferHandler) StartTransfer(c *gin.Context) {
 		return
 	}
 
-	h.mu.Lock()
-	h.managers[requestID] = transferMgr
-	h.mu.Unlock()
+	h.managers.Store(requestID, transferMgr)
 
 	go h.monitorTransfer(requestID, transferMgr)
 
@@ -211,9 +208,7 @@ func (h *TransferHandler) monitorTransfer(requestID string, transferMgr *transfe
 				errMsg = &stats.Error
 			}
 			_ = h.store.UpdateStatus(requestID, stats.Status, &end, errMsg)
-			h.mu.Lock()
-			delete(h.managers, requestID)
-			h.mu.Unlock()
+			h.managers.Delete(requestID)
 			return
 		}
 	}
@@ -289,10 +284,8 @@ func (h *TransferHandler) CancelTransfer(c *gin.Context) {
 		return
 	}
 
-	h.mu.RLock()
-	mgr, ok := h.managers[requestID]
-	h.mu.RUnlock()
-	if ok {
+	if v, ok := h.managers.Load(requestID); ok {
+		mgr := v.(*transfer.TransferManager)
 		mgr.Stop()
 	}
 	now := time.Now().UTC()
@@ -301,9 +294,7 @@ func (h *TransferHandler) CancelTransfer(c *gin.Context) {
 		return
 	}
 
-	h.mu.Lock()
-	delete(h.managers, requestID)
-	h.mu.Unlock()
+	h.managers.Delete(requestID)
 
 	c.JSON(http.StatusOK, models.TransferResponse{Status: transfer.StatusCancelled, RequestID: requestID})
 }
