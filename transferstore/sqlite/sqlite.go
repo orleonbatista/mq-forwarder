@@ -144,3 +144,8 @@ func nilIfTime(t *time.Time) interface{} {
 	}
 	return t.Format(time.RFC3339)
 }
+
+// Ping verifies the database connection is alive.
+func (s *SQLiteStore) Ping() error {
+	return s.db.Ping()
+}

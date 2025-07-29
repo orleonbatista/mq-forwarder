@@ -75,6 +75,9 @@ func main() {
 		}
 	}
 	handler := handlers.NewTransferHandler(store)
+	if hs, ok := store.(handlers.Pinger); ok {
+		handlers.HealthStore = hs
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
