@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"mq-transfer-go/internal/otelutils"
 	"net"
 	"net/http"
 	"os"
@@ -14,12 +13,7 @@ import (
 )
 
 func TestMainFunction(t *testing.T) {
-	os.Setenv("OTLP_ENDPOINT", "")
 	os.Setenv("DB_PATH", ":memory:")
-	otelInit = func(otelutils.OTelConfig) (*otelutils.MQMetrics, error) {
-		return nil, errors.New("init")
-	}
-	defer func() { otelInit = otelutils.InitOTel }()
 	serverAddr = ":18080"
 	defer func() { serverAddr = ":8080" }()
 	done := make(chan struct{})
@@ -60,7 +54,6 @@ func TestMainFunction(t *testing.T) {
 }
 
 func TestMainListenError(t *testing.T) {
-	os.Setenv("OTLP_ENDPOINT", "")
 	os.Setenv("DB_PATH", ":memory:")
 	serverAddr = ":18081"
 	ln, err := net.Listen("tcp", serverAddr)

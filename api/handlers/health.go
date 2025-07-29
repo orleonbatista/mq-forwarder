@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"mq-transfer-go/api/models"
+	"mq-forwarder-go/api/models"
 )
 
 // Pinger defines the behaviour required to verify a store connection.

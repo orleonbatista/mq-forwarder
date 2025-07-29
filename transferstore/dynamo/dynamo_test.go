@@ -7,7 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"mq-transfer-go/transferstore"
+	"mq-forwarder-go/transferstore"
 )
 
 type mockClient struct {

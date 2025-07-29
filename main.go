@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,12 +15,13 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	docs "mq-transfer-go/api/docs"
-	"mq-transfer-go/api/handlers"
-	"mq-transfer-go/internal/otelutils"
-	"mq-transfer-go/transferstore"
-	dynamostore "mq-transfer-go/transferstore/dynamo"
-	sqlitestore "mq-transfer-go/transferstore/sqlite"
+	ddgin "gopkg.in/DataDog/dd-trace-go.v1/contrib/gin-gonic/gin"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+	docs "mq-forwarder-go/api/docs"
+	"mq-forwarder-go/api/handlers"
+	"mq-forwarder-go/transferstore"
+	dynamostore "mq-forwarder-go/transferstore/dynamo"
+	sqlitestore "mq-forwarder-go/transferstore/sqlite"
 )
 
 var logFatalf = log.Fatalf
@@ -27,7 +29,6 @@ var serverAddr = ":8080"
 var serverShutdown = func(srv *http.Server, ctx context.Context) error {
 	return srv.Shutdown(ctx)
 }
-var otelInit = otelutils.InitOTel
 
 // @title MQ Transfer API
 // @version 1.0
@@ -42,19 +43,18 @@ var otelInit = otelutils.InitOTel
 // @BasePath /
 // @schemes http
 func main() {
-	otelConfig := otelutils.OTelConfig{
-		ServiceName:    "mq-transfer-service",
-		ServiceVersion: "1.0.0",
-		Environment:    os.Getenv("ENV"),
-		OTLPEndpoint:   os.Getenv("OTLP_ENDPOINT"),
+	opts := []tracer.StartOption{}
+	if _, ok := os.LookupEnv("DD_SERVICE"); !ok {
+		opts = append(opts, tracer.WithServiceName("mq-forwarder-service"))
 	}
-	if otelConfig.Environment == "" {
-		otelConfig.Environment = "development"
+	if _, ok := os.LookupEnv("DD_ENV"); !ok {
+		opts = append(opts, tracer.WithEnv("prod"))
 	}
-	_, err := otelInit(otelConfig)
-	if err != nil {
-		log.Printf("Aviso: Falha ao inicializar OpenTelemetry: %v. Continuando sem telemetria.", err)
+	if host, ok := os.LookupEnv("DD_AGENT_HOST"); ok {
+		opts = append(opts, tracer.WithAgentAddr(fmt.Sprintf("%s:8126", host)))
 	}
+	tracer.Start(opts...)
+	defer tracer.Stop()
 
 	var store transferstore.TransferStore
 	if os.Getenv("USE_DYNAMO") == "true" {
@@ -82,6 +82,7 @@ func main() {
 	defer stop()
 
 	r := gin.Default()
+	r.Use(ddgin.Middleware("mq-forwarder-service"))
 	// Use empty host so swagger calls the same host that served the docs
 	docs.OpenAPIInfo.Host = ""
 	v1 := r.Group("/api/v1")
@@ -116,8 +117,6 @@ func main() {
 	if err := serverShutdown(srv, shutdownCtx); err != nil {
 		logFatalf("Erro ao desligar o servidor: %v", err)
 	}
-
-	otelutils.Shutdown(shutdownCtx)
 
 	log.Println("Servidor encerrado com sucesso")
 }

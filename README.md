@@ -1,6 +1,6 @@
 # MQ Forwarder
 
-Aplicação escrita em Go para transferir mensagens entre filas IBM MQ. Ela expõe uma API REST usando o framework Gin e registra métricas opcionais via OpenTelemetry.
+Aplicação escrita em Go para transferir mensagens entre filas IBM MQ. Ela expõe uma API REST usando o framework Gin e está instrumentada com o APM do Datadog.
 
 Cada instância de worker abre conexões próprias com as filas de origem e destino, permitindo o processamento totalmente paralelo em máquinas multi-core.
 
@@ -89,9 +89,9 @@ Retorna o status de saúde e a versão atual da aplicação.
 - **BATCH_SIZE**: tamanho do lote de mensagens antes do commit quando `commitInterval` não é especificado na requisição.
 - **BUFFER_SIZE**: define o tamanho do buffer utilizado para ler mensagens quando `bufferSize` não é informado na requisição.
 
-### Métricas OpenTelemetry
+### Observabilidade com Datadog
 
-A aplicação exporta métricas como `mq_messages_transferred`, `mq_bytes_transferred`, `mq_transfer_duration`, `mq_commits` e `mq_errors`, permitindo monitorar o progresso e eventuais falhas.
+A aplicação envia traces para o Datadog APM, permitindo acompanhar o processamento das mensagens e identificar eventuais falhas.
 
 A documentação OpenAPI gerada automaticamente pode ser acessada em `/swagger/index.html` quando o servidor está em execução.
 

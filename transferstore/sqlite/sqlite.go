@@ -7,7 +7,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"mq-transfer-go/transferstore"
+	"mq-forwarder-go/transferstore"
 )
 
 // SQLiteStore implements TransferStore backed by SQLite

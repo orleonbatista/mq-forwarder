@@ -3,7 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"errors"
-	"mq-transfer-go/transferstore"
+	"mq-forwarder-go/transferstore"
 	"os"
 	"testing"
 	"time"
