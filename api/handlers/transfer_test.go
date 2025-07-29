@@ -78,9 +78,7 @@ func TestStartAndCancelTransfer(t *testing.T) {
 	var resp models.TransferResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
-	h.mu.Lock()
-	h.managers[resp.RequestID] = transfer.NewTransferManager(transfer.TransferOptions{})
-	h.mu.Unlock()
+	h.managers.Store(resp.RequestID, transfer.NewTransferManager(transfer.TransferOptions{}))
 
 	store.EXPECT().GetByID(resp.RequestID).Return(transferstore.TransferRequest{RequestID: resp.RequestID, Status: transfer.StatusInProgress}, nil)
 	store.EXPECT().UpdateStatus(resp.RequestID, transfer.StatusCancelled, gomock.Any(), gomock.Nil()).Return(nil)
