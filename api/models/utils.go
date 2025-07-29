@@ -8,5 +8,6 @@ func NewHealthResponse(status, version string) HealthResponse {
 		Status:    status,
 		Version:   version,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Database:  "unknown",
 	}
 }

@@ -10,4 +10,7 @@ func TestNewHealthResponse(t *testing.T) {
 	if resp.Version != "1.0.0" {
 		t.Errorf("expected version '1.0.0', got %s", resp.Version)
 	}
+	if resp.Database != "unknown" {
+		t.Errorf("expected database 'unknown', got %s", resp.Database)
+	}
 }

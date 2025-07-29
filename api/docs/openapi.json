@@ -259,6 +259,10 @@
                     "timestamp": {
                         "type": "string",
                         "example": "2025-06-04T00:15:30Z"
+                    },
+                    "database": {
+                        "type": "string",
+                        "example": "ok"
                     }
                 }
             },
