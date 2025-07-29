@@ -167,6 +167,9 @@ components:
         timestamp:
           example: 2025-06-04T00:15:30Z
           type: string
+        database:
+          example: ok
+          type: string
       type: object
     models.TransferRequest:
       properties:

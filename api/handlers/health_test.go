@@ -24,8 +24,8 @@ func TestHealthCheck(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "\"status\":\"ok\"") {
-		t.Fatalf("unexpected body: %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "\"database\":\"ok\"") {
+		t.Fatalf("database not ok: %s", w.Body.String())
 	}
 }
 
@@ -39,5 +39,8 @@ func TestHealthCheckFail(t *testing.T) {
 	HealthCheck(c)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "\"database\":\"unhealthy\"") {
+		t.Fatalf("database status not unhealthy: %s", w.Body.String())
 	}
 }

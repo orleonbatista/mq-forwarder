@@ -29,7 +29,10 @@ func HealthCheck(c *gin.Context) {
 	if HealthStore != nil {
 		if err := HealthStore.Ping(); err != nil {
 			resp.Status = "db_error"
+			resp.Database = "unhealthy"
 			status = http.StatusInternalServerError
+		} else {
+			resp.Database = "ok"
 		}
 	}
 	c.JSON(status, resp)
