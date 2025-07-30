@@ -61,4 +61,6 @@ func TestIntegrationSQLite(t *testing.T) {
 	if w4.Code != http.StatusOK {
 		t.Fatalf("cancel failed")
 	}
+
+	h.wg.Wait()
 }

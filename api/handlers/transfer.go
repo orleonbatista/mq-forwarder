@@ -21,6 +21,7 @@ import (
 type TransferHandler struct {
 	store    transferstore.TransferStore
 	managers sync.Map // key string -> *transfer.TransferManager
+	wg       sync.WaitGroup
 }
 
 // NewTransferHandler creates a new handler with the given store.
@@ -183,6 +184,7 @@ func (h *TransferHandler) StartTransfer(c *gin.Context) {
 
 	h.managers.Store(requestID, transferMgr)
 
+	h.wg.Add(1)
 	go h.monitorTransfer(requestID, transferMgr)
 
 	c.JSON(http.StatusAccepted, models.TransferResponse{
@@ -192,6 +194,7 @@ func (h *TransferHandler) StartTransfer(c *gin.Context) {
 }
 
 func (h *TransferHandler) monitorTransfer(requestID string, transferMgr *transfer.TransferManager) {
+	defer h.wg.Done()
 	ticker := time.NewTicker(monitorInterval)
 	defer ticker.Stop()
 

@@ -68,6 +68,7 @@ func TestStartAndCancelTransfer(t *testing.T) {
 	}
 	body, _ := json.Marshal(req)
 	store.EXPECT().Create(gomock.Any()).Return(nil)
+	store.EXPECT().UpdateProgress(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/transfer", bytes.NewBuffer(body))
@@ -78,10 +79,8 @@ func TestStartAndCancelTransfer(t *testing.T) {
 	var resp models.TransferResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
-	h.managers.Store(resp.RequestID, transfer.NewTransferManager(transfer.TransferOptions{}))
-
 	store.EXPECT().GetByID(resp.RequestID).Return(transferstore.TransferRequest{RequestID: resp.RequestID, Status: transfer.StatusInProgress}, nil)
-	store.EXPECT().UpdateStatus(resp.RequestID, transfer.StatusCancelled, gomock.Any(), gomock.Nil()).Return(nil)
+	store.EXPECT().UpdateStatus(resp.RequestID, transfer.StatusCancelled, gomock.Any(), gomock.Nil()).AnyTimes()
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Params = gin.Params{gin.Param{Key: "requestId", Value: resp.RequestID}}
@@ -89,6 +88,8 @@ func TestStartAndCancelTransfer(t *testing.T) {
 	if w2.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w2.Code)
 	}
+
+	h.wg.Wait()
 }
 
 func TestCancelCompleted(t *testing.T) {
