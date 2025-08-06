@@ -25,6 +25,7 @@ type DynamoAPI interface {
 type DynamoStore struct {
 	client DynamoAPI
 	table  string
+	closed bool
 }
 
 func NewDynamoStore(client DynamoAPI, table string) *DynamoStore {
@@ -32,6 +33,9 @@ func NewDynamoStore(client DynamoAPI, table string) *DynamoStore {
 }
 
 func (d *DynamoStore) Create(req transferstore.TransferRequest) error {
+	if d.closed {
+		return errors.New("store closed")
+	}
 	item, err := attributevalue.MarshalMap(req)
 	if err != nil {
 		return err
@@ -44,6 +48,9 @@ func (d *DynamoStore) Create(req transferstore.TransferRequest) error {
 }
 
 func (d *DynamoStore) GetByID(id string) (transferstore.TransferRequest, error) {
+	if d.closed {
+		return transferstore.TransferRequest{}, errors.New("store closed")
+	}
 	out, err := d.client.GetItem(context.Background(), &dynamodb.GetItemInput{
 		TableName: &d.table,
 		Key: map[string]types.AttributeValue{
@@ -64,6 +71,9 @@ func (d *DynamoStore) GetByID(id string) (transferstore.TransferRequest, error) 
 }
 
 func (d *DynamoStore) UpdateStatus(id, status string, endTime *time.Time, errorMsg *string) error {
+	if d.closed {
+		return errors.New("store closed")
+	}
 	expr := "SET #S = :s"
 	attrs := map[string]types.AttributeValue{
 		":s": &types.AttributeValueMemberS{Value: status},
@@ -89,6 +99,9 @@ func (d *DynamoStore) UpdateStatus(id, status string, endTime *time.Time, errorM
 }
 
 func (d *DynamoStore) UpdateProgress(id string, messagesTransferred int, bytesTransferred int) error {
+	if d.closed {
+		return errors.New("store closed")
+	}
 	expr := "SET MessagesTransferred = :m, BytesTransferred = :b"
 	_, err := d.client.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
 		TableName:        &d.table,
@@ -103,6 +116,9 @@ func (d *DynamoStore) UpdateProgress(id string, messagesTransferred int, bytesTr
 }
 
 func (d *DynamoStore) List() ([]transferstore.TransferRequest, error) {
+	if d.closed {
+		return nil, errors.New("store closed")
+	}
 	out, err := d.client.Scan(context.Background(), &dynamodb.ScanInput{TableName: &d.table})
 	if err != nil {
 		return nil, err
@@ -116,7 +132,16 @@ func (d *DynamoStore) List() ([]transferstore.TransferRequest, error) {
 
 // Ping verifies connectivity with DynamoDB by performing a lightweight scan.
 func (d *DynamoStore) Ping() error {
+	if d.closed {
+		return errors.New("store closed")
+	}
 	limit := int32(1)
 	_, err := d.client.Scan(context.Background(), &dynamodb.ScanInput{TableName: &d.table, Limit: &limit})
 	return err
+}
+
+// Close marks the store as closed. Subsequent operations will fail.
+func (d *DynamoStore) Close() error {
+	d.closed = true
+	return nil
 }
