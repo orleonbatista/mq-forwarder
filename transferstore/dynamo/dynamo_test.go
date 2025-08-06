@@ -127,6 +127,13 @@ func TestDynamoStore(t *testing.T) {
 	if err := store.Ping(); err != nil {
 		t.Fatalf("ping: %v", err)
 	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := store.Ping(); err == nil {
+		t.Fatalf("expected ping error after close")
+	}
 }
 
 func TestDynamoStoreErrors(t *testing.T) {
