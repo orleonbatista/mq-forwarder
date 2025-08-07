@@ -1,91 +1,150 @@
 package dynamo
 
 import (
-	"context"
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/guregu/dynamo"
 	"mq-forwarder-go/transferstore"
 )
 
-type mockClient struct {
-	items map[string]map[string]types.AttributeValue
+type mockTable struct {
+	items map[string]transferstore.TransferRequest
+	fail  bool
 }
 
-type errClient struct{}
-
-func (e *errClient) PutItem(ctx context.Context, in *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
-	return nil, context.Canceled
-}
-func (e *errClient) GetItem(ctx context.Context, in *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-	return nil, context.Canceled
-}
-func (e *errClient) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
-	return nil, context.Canceled
-}
-func (e *errClient) Scan(ctx context.Context, in *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
-	return nil, context.Canceled
+func newMockTable() *mockTable {
+	return &mockTable{items: make(map[string]transferstore.TransferRequest)}
 }
 
-func newMock() *mockClient {
-	return &mockClient{items: make(map[string]map[string]types.AttributeValue)}
+func (m *mockTable) Put(item interface{}) PutItem {
+	return &mockPut{m: m, item: item.(transferstore.TransferRequest)}
 }
 
-func (m *mockClient) PutItem(ctx context.Context, in *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
-	id := in.Item["RequestID"].(*types.AttributeValueMemberS).Value
-	cp := make(map[string]types.AttributeValue)
-	for k, v := range in.Item {
-		cp[k] = v
+func (m *mockTable) Get(key string, val interface{}) GetItem {
+	return &mockGet{m: m, id: val.(string)}
+}
+
+func (m *mockTable) Update(key string, val interface{}) UpdateItem {
+	return &mockUpdate{m: m, id: val.(string)}
+}
+
+func (m *mockTable) Scan() ScanItem {
+	return &mockScan{m: m}
+}
+
+type mockPut struct {
+	m    *mockTable
+	item transferstore.TransferRequest
+}
+
+func (p *mockPut) Run() error {
+	if p.m.fail {
+		return errors.New("fail")
 	}
-	m.items[id] = cp
-	return &dynamodb.PutItemOutput{}, nil
+	p.m.items[p.item.RequestID] = p.item
+	return nil
 }
 
-func (m *mockClient) GetItem(ctx context.Context, in *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-	id := in.Key["RequestID"].(*types.AttributeValueMemberS).Value
-	item, ok := m.items[id]
+type mockGet struct {
+	m  *mockTable
+	id string
+}
+
+func (g *mockGet) One(out interface{}) error {
+	if g.m.fail {
+		return errors.New("fail")
+	}
+	req, ok := g.m.items[g.id]
 	if !ok {
-		return &dynamodb.GetItemOutput{}, nil
+		return dynamo.ErrNotFound
 	}
-	return &dynamodb.GetItemOutput{Item: item}, nil
+	*(out.(*transferstore.TransferRequest)) = req
+	return nil
 }
 
-func (m *mockClient) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
-	id := in.Key["RequestID"].(*types.AttributeValueMemberS).Value
-	itm := m.items[id]
-	if itm == nil {
-		itm = make(map[string]types.AttributeValue)
-		m.items[id] = itm
-	}
-	expr := *in.UpdateExpression
-	if expr == "SET MessagesTransferred = :m, BytesTransferred = :b" {
-		itm["MessagesTransferred"] = in.ExpressionAttributeValues[":m"]
-		itm["BytesTransferred"] = in.ExpressionAttributeValues[":b"]
-	} else {
-		itm["Status"] = in.ExpressionAttributeValues[":s"]
-		if v, ok := in.ExpressionAttributeValues[":e"]; ok {
-			itm["EndTime"] = v
-		}
-		if v, ok := in.ExpressionAttributeValues[":err"]; ok {
-			itm["Error"] = v
-		}
-	}
-	return &dynamodb.UpdateItemOutput{}, nil
+type mockUpdate struct {
+	m    *mockTable
+	id   string
+	sets map[string]interface{}
 }
 
-func (m *mockClient) Scan(ctx context.Context, in *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
-	var lst []map[string]types.AttributeValue
-	for _, v := range m.items {
-		lst = append(lst, v)
+func (u *mockUpdate) Set(name string, value interface{}) UpdateItem {
+	if u.sets == nil {
+		u.sets = make(map[string]interface{})
 	}
-	return &dynamodb.ScanOutput{Items: lst}, nil
+	u.sets[name] = value
+	return u
+}
+
+func (u *mockUpdate) Run() error {
+	if u.m.fail {
+		return errors.New("fail")
+	}
+	req := u.m.items[u.id]
+	for k, v := range u.sets {
+		switch k {
+		case "Status":
+			req.Status = v.(string)
+		case "EndTime":
+			if t, ok := v.(*time.Time); ok {
+				req.EndTime = t
+			}
+		case "Error":
+			req.Error = v.(string)
+		case "MessagesTransferred":
+			req.MessagesTransferred = v.(int)
+		case "BytesTransferred":
+			req.BytesTransferred = v.(int)
+		}
+	}
+	u.m.items[u.id] = req
+	return nil
+}
+
+type mockScan struct {
+	m     *mockTable
+	limit int64
+}
+
+func (s *mockScan) Limit(n int64) ScanItem {
+	s.limit = n
+	return s
+}
+
+func (s *mockScan) All(out interface{}) error {
+	if s.m.fail {
+		return errors.New("fail")
+	}
+	list := make([]transferstore.TransferRequest, 0, len(s.m.items))
+	for _, v := range s.m.items {
+		list = append(list, v)
+		if s.limit > 0 && int64(len(list)) >= s.limit {
+			break
+		}
+	}
+	*(out.(*[]transferstore.TransferRequest)) = list
+	return nil
+}
+
+func (s *mockScan) Count() (int64, error) {
+	if s.m.fail {
+		return 0, errors.New("fail")
+	}
+	var n int64
+	for range s.m.items {
+		n++
+		if s.limit > 0 && n >= s.limit {
+			break
+		}
+	}
+	return n, nil
 }
 
 func TestDynamoStore(t *testing.T) {
-	mock := newMock()
-	store := NewDynamoStore(mock, "tbl")
+	tbl := newMockTable()
+	store := NewDynamoStoreWithTable(tbl)
 	now := time.Now().UTC()
 	req := transferstore.TransferRequest{
 		RequestID:             "1",
@@ -123,14 +182,21 @@ func TestDynamoStore(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v %v", len(list), err)
 	}
-
 	if err := store.Ping(); err != nil {
 		t.Fatalf("ping: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := store.Ping(); err == nil {
+		t.Fatalf("expected ping error after close")
 	}
 }
 
 func TestDynamoStoreErrors(t *testing.T) {
-	store := NewDynamoStore(&errClient{}, "tbl")
+	tbl := newMockTable()
+	tbl.fail = true
+	store := NewDynamoStoreWithTable(tbl)
 	now := time.Now()
 	req := transferstore.TransferRequest{RequestID: "1", StartTime: now}
 	if err := store.Create(req); err == nil {
@@ -148,7 +214,6 @@ func TestDynamoStoreErrors(t *testing.T) {
 	if _, err := store.List(); err == nil {
 		t.Fatal("expected error")
 	}
-
 	if err := store.Ping(); err == nil {
 		t.Fatal("expected ping error")
 	}
