@@ -1,122 +1,158 @@
 package dynamo
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	dynamolib "github.com/guregu/dynamo"
 	"mq-forwarder-go/transferstore"
 )
 
-// DynamoAPI describes the dynamodb client methods used by the store.
-type DynamoAPI interface {
-	PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
-	GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
-	UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
-	Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error)
-}
+type (
+	TableAPI interface {
+		Put(interface{}) PutItem
+		Get(string, interface{}) GetItem
+		Update(string, interface{}) UpdateItem
+		Scan() ScanItem
+	}
 
-// DynamoStore implements TransferStore backed by DynamoDB
+	PutItem interface {
+		Run() error
+	}
+
+	GetItem interface {
+		One(out interface{}) error
+	}
+
+	UpdateItem interface {
+		Set(name string, value interface{}) UpdateItem
+		Run() error
+	}
+
+	ScanItem interface {
+		Limit(n int64) ScanItem
+		All(out interface{}) error
+		Count() (int64, error)
+	}
+)
 
 type DynamoStore struct {
-	client DynamoAPI
-	table  string
+	table  TableAPI
+	closed bool
 }
 
-func NewDynamoStore(client DynamoAPI, table string) *DynamoStore {
-	return &DynamoStore{client: client, table: table}
+func NewDynamoStore(db *dynamolib.DB, tableName string) *DynamoStore {
+	return &DynamoStore{table: dynamoTable{tbl: db.Table(tableName)}}
+}
+
+func NewDynamoStoreWithTable(tbl TableAPI) *DynamoStore {
+	return &DynamoStore{table: tbl}
 }
 
 func (d *DynamoStore) Create(req transferstore.TransferRequest) error {
-	item, err := attributevalue.MarshalMap(req)
-	if err != nil {
-		return err
+	if d.closed {
+		return errors.New("store closed")
 	}
-	_, err = d.client.PutItem(context.Background(), &dynamodb.PutItemInput{
-		TableName: &d.table,
-		Item:      item,
-	})
-	return err
+	return d.table.Put(req).Run()
 }
 
 func (d *DynamoStore) GetByID(id string) (transferstore.TransferRequest, error) {
-	out, err := d.client.GetItem(context.Background(), &dynamodb.GetItemInput{
-		TableName: &d.table,
-		Key: map[string]types.AttributeValue{
-			"RequestID": &types.AttributeValueMemberS{Value: id},
-		},
-	})
-	if err != nil {
-		return transferstore.TransferRequest{}, err
-	}
-	if out.Item == nil {
-		return transferstore.TransferRequest{}, errors.New("not found")
+	if d.closed {
+		return transferstore.TransferRequest{}, errors.New("store closed")
 	}
 	var req transferstore.TransferRequest
-	if err := attributevalue.UnmarshalMap(out.Item, &req); err != nil {
+	err := d.table.Get("RequestID", id).One(&req)
+	if err != nil {
+		if errors.Is(err, dynamolib.ErrNotFound) {
+			return transferstore.TransferRequest{}, errors.New("not found")
+		}
 		return transferstore.TransferRequest{}, err
 	}
 	return req, nil
 }
 
 func (d *DynamoStore) UpdateStatus(id, status string, endTime *time.Time, errorMsg *string) error {
-	expr := "SET #S = :s"
-	attrs := map[string]types.AttributeValue{
-		":s": &types.AttributeValueMemberS{Value: status},
+	if d.closed {
+		return errors.New("store closed")
 	}
-	names := map[string]string{"#S": "Status"}
+	upd := d.table.Update("RequestID", id).Set("Status", status)
 	if endTime != nil {
-		expr += ", EndTime = :e"
-		attrs[":e"] = &types.AttributeValueMemberS{Value: endTime.Format(time.RFC3339)}
+		upd = upd.Set("EndTime", endTime)
 	}
 	if errorMsg != nil {
-		expr += ", #E = :err"
-		attrs[":err"] = &types.AttributeValueMemberS{Value: *errorMsg}
-		names["#E"] = "Error"
+		upd = upd.Set("Error", *errorMsg)
 	}
-	_, err := d.client.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
-		TableName:                 &d.table,
-		Key:                       map[string]types.AttributeValue{"RequestID": &types.AttributeValueMemberS{Value: id}},
-		UpdateExpression:          &expr,
-		ExpressionAttributeValues: attrs,
-		ExpressionAttributeNames:  names,
-	})
-	return err
+	return upd.Run()
 }
 
 func (d *DynamoStore) UpdateProgress(id string, messagesTransferred int, bytesTransferred int) error {
-	expr := "SET MessagesTransferred = :m, BytesTransferred = :b"
-	_, err := d.client.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
-		TableName:        &d.table,
-		Key:              map[string]types.AttributeValue{"RequestID": &types.AttributeValueMemberS{Value: id}},
-		UpdateExpression: &expr,
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":m": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", messagesTransferred)},
-			":b": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", bytesTransferred)},
-		},
-	})
-	return err
+	if d.closed {
+		return errors.New("store closed")
+	}
+	return d.table.Update("RequestID", id).
+		Set("MessagesTransferred", messagesTransferred).
+		Set("BytesTransferred", bytesTransferred).
+		Run()
 }
 
 func (d *DynamoStore) List() ([]transferstore.TransferRequest, error) {
-	out, err := d.client.Scan(context.Background(), &dynamodb.ScanInput{TableName: &d.table})
-	if err != nil {
-		return nil, err
+	if d.closed {
+		return nil, errors.New("store closed")
 	}
 	var reqs []transferstore.TransferRequest
-	if err := attributevalue.UnmarshalListOfMaps(out.Items, &reqs); err != nil {
+	if err := d.table.Scan().All(&reqs); err != nil {
 		return nil, err
 	}
 	return reqs, nil
 }
 
-// Ping verifies connectivity with DynamoDB by performing a lightweight scan.
 func (d *DynamoStore) Ping() error {
-	limit := int32(1)
-	_, err := d.client.Scan(context.Background(), &dynamodb.ScanInput{TableName: &d.table, Limit: &limit})
+	if d.closed {
+		return errors.New("store closed")
+	}
+	_, err := d.table.Scan().Limit(1).Count()
 	return err
 }
+
+func (d *DynamoStore) Close() error {
+	d.closed = true
+	return nil
+}
+
+// Adapter implementations
+
+type dynamoTable struct{ tbl dynamolib.Table }
+
+func (t dynamoTable) Put(item interface{}) PutItem { return &dynamoPut{t.tbl.Put(item)} }
+func (t dynamoTable) Get(partitionKey string, value interface{}) GetItem {
+	return &dynamoGet{t.tbl.Get(partitionKey, value)}
+}
+func (t dynamoTable) Update(partitionKey string, value interface{}) UpdateItem {
+	return &dynamoUpdate{t.tbl.Update(partitionKey, value)}
+}
+func (t dynamoTable) Scan() ScanItem { return &dynamoScan{t.tbl.Scan()} }
+
+type dynamoPut struct{ put *dynamolib.Put }
+
+func (p *dynamoPut) Run() error { return p.put.Run() }
+
+type dynamoGet struct{ q *dynamolib.Query }
+
+func (g *dynamoGet) One(out interface{}) error { return g.q.One(out) }
+
+type dynamoUpdate struct{ upd *dynamolib.Update }
+
+func (u *dynamoUpdate) Set(name string, value interface{}) UpdateItem {
+	u.upd = u.upd.Set(name, value)
+	return u
+}
+func (u *dynamoUpdate) Run() error { return u.upd.Run() }
+
+type dynamoScan struct{ sc *dynamolib.Scan }
+
+func (s *dynamoScan) Limit(n int64) ScanItem {
+	s.sc = s.sc.Limit(n)
+	return s
+}
+func (s *dynamoScan) All(out interface{}) error { return s.sc.All(out) }
+func (s *dynamoScan) Count() (int64, error)     { return s.sc.Count() }

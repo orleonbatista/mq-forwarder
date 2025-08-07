@@ -10,9 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/gin-gonic/gin"
+	"github.com/guregu/dynamo"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	ddgin "gopkg.in/DataDog/dd-trace-go.v1/contrib/gin-gonic/gin"
@@ -58,11 +59,13 @@ func main() {
 
 	var store transferstore.TransferStore
 	if os.Getenv("USE_DYNAMO") == "true" {
-		cfg, err := config.LoadDefaultConfig(context.Background())
+		region := os.Getenv("AWS_REGION")
+		sess, err := session.NewSession(&aws.Config{Region: aws.String(region)})
 		if err != nil {
-			logFatalf("falha ao carregar config AWS: %v", err)
+			logFatalf("falha ao criar sessao AWS: %v", err)
 		}
-		store = dynamostore.NewDynamoStore(dynamodb.NewFromConfig(cfg), "transfer_requests")
+		db := dynamo.New(sess)
+		store = dynamostore.NewDynamoStore(db, "transfer_requests")
 	} else {
 		var err error
 		path := os.Getenv("DB_PATH")
