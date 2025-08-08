@@ -248,7 +248,19 @@ func (h *TransferHandler) GetTransferStatus(c *gin.Context) {
 // @Success 200 {array} models.TransferStatus "Lista de transferências"
 // @Router /api/v1/transfers [get]
 func (h *TransferHandler) ListTransfers(c *gin.Context) {
-	reqs, err := h.store.List()
+	limit := 100
+	if lStr := c.Query("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	offset := 0
+	if oStr := c.Query("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+	reqs, err := h.store.List(offset, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.TransferResponse{Status: transfer.StatusFailed, Error: "erro ao listar"})
 		return

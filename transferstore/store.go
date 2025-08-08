@@ -37,5 +37,8 @@ type TransferStore interface {
 	GetByID(id string) (TransferRequest, error)
 	UpdateStatus(id, status string, endTime *time.Time, errorMsg *string) error
 	UpdateProgress(id string, messagesTransferred int, bytesTransferred int) error
-	List() ([]TransferRequest, error)
+	// List returns transfer records with pagination support.
+	// offset specifies how many records to skip before beginning to return results.
+	// limit defines the maximum number of records to return.
+	List(offset, limit int) ([]TransferRequest, error)
 }

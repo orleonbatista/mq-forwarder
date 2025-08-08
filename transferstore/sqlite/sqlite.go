@@ -97,9 +97,16 @@ func (s *SQLiteStore) UpdateProgress(id string, messagesTransferred int, bytesTr
 		}).Error
 }
 
-func (s *SQLiteStore) List() ([]transferstore.TransferRequest, error) {
+func (s *SQLiteStore) List(offset, limit int) ([]transferstore.TransferRequest, error) {
 	var models []transferRequestModel
-	if err := s.db.Find(&models).Error; err != nil {
+	q := s.db
+	if offset > 0 {
+		q = q.Offset(offset)
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&models).Error; err != nil {
 		return nil, err
 	}
 	results := make([]transferstore.TransferRequest, 0, len(models))

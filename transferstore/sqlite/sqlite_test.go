@@ -51,7 +51,7 @@ func TestSQLiteStore(t *testing.T) {
 	if fetched.Status != "completed" || fetched.Error != errMsg {
 		t.Fatalf("status not updated: %+v", fetched)
 	}
-	list, err := store.List()
+	list, err := store.List(0, 10)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list failed: %v %v", len(list), err)
 	}

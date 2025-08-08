@@ -112,10 +112,11 @@ func TestListTransfers(t *testing.T) {
 	h, store, ctrl := newMockHandler(t)
 	defer ctrl.Finish()
 	list := []transferstore.TransferRequest{{RequestID: "a"}, {RequestID: "b"}}
-	store.EXPECT().List().Return(list, nil)
+	store.EXPECT().List(0, 100).Return(list, nil)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 	h.ListTransfers(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("unexpected status")
@@ -124,5 +125,26 @@ func TestListTransfers(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &out)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 entries")
+	}
+}
+
+func TestListTransfersWithParams(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, store, ctrl := newMockHandler(t)
+	defer ctrl.Finish()
+	list := []transferstore.TransferRequest{{RequestID: "c"}}
+	store.EXPECT().List(5, 1).Return(list, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?limit=1&offset=5", nil)
+	h.ListTransfers(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status")
+	}
+	var out []models.TransferStatus
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if len(out) != 1 || out[0].RequestID != "c" {
+		t.Fatalf("expected filtered result")
 	}
 }
