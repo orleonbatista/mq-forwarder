@@ -118,6 +118,21 @@ paths:
   /api/v1/transfers:
     get:
       description: Retorna uma lista com todas as transferências e seus status
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+          description: Número máximo de registros a retornar
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          description: Quantidade de registros a pular antes de iniciar a lista
       responses:
         "200":
           description: Lista de transferências

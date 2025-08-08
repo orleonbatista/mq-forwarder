@@ -95,15 +95,27 @@ func (d *DynamoStore) UpdateProgress(id string, messagesTransferred int, bytesTr
 		Run()
 }
 
-func (d *DynamoStore) List() ([]transferstore.TransferRequest, error) {
+func (d *DynamoStore) List(offset, limit int) ([]transferstore.TransferRequest, error) {
 	if d.closed {
 		return nil, errors.New("store closed")
 	}
 	var reqs []transferstore.TransferRequest
-	if err := d.table.Scan().All(&reqs); err != nil {
+	scan := d.table.Scan()
+	if limit > 0 {
+		// fetch enough items to satisfy offset + limit
+		scan = scan.Limit(int64(offset + limit))
+	}
+	if err := scan.All(&reqs); err != nil {
 		return nil, err
 	}
-	return reqs, nil
+	if offset >= len(reqs) {
+		return []transferstore.TransferRequest{}, nil
+	}
+	end := len(reqs)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return reqs[offset:end], nil
 }
 
 func (d *DynamoStore) Ping() error {

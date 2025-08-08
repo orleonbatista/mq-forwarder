@@ -178,7 +178,7 @@ func TestDynamoStore(t *testing.T) {
 	if got.Status != "completed" || got.Error != msg {
 		t.Fatalf("status wrong: %+v", got)
 	}
-	list, err := store.List()
+	list, err := store.List(0, 10)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v %v", len(list), err)
 	}
@@ -211,7 +211,7 @@ func TestDynamoStoreErrors(t *testing.T) {
 	if err := store.UpdateProgress("1", 1, 1); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := store.List(); err == nil {
+	if _, err := store.List(0, 10); err == nil {
 		t.Fatal("expected error")
 	}
 	if err := store.Ping(); err == nil {
