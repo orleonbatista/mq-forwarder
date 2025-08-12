@@ -21,7 +21,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.HealthResponse"
+                $ref: "#/components/schemas/models.ApiResponseHealthResponse"
       summary: Health Check
       tags:
         - health
@@ -41,19 +41,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
         "400":
           description: Erro na requisição
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
         "500":
           description: Erro interno
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
       summary: Iniciar transferência de mensagens MQ
       tags:
         - transfer
@@ -73,13 +73,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferStatus"
+                $ref: "#/components/schemas/models.ApiResponseTransferStatus"
         "404":
           description: Transferência não encontrada
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
       summary: Obter status da transferência
       tags:
         - transfer
@@ -99,19 +99,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
         "400":
           description: Transferência já concluída
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
         "404":
           description: Transferência não encontrada
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/models.TransferResponse"
+                $ref: "#/components/schemas/models.ApiResponseTransferResponse"
       summary: Cancelar uma transferência em andamento
       tags:
         - transfer
@@ -133,15 +133,36 @@ paths:
             default: 0
             minimum: 0
           description: Quantidade de registros a pular antes de iniciar a lista
+        - in: query
+          name: status
+          schema:
+            type: string
+          description: Filtrar pelo status da transferência
+        - in: query
+          name: start
+          schema:
+            type: string
+            format: date-time
+          description: Filtrar por data inicial (>=)
+        - in: query
+          name: end
+          schema:
+            type: string
+            format: date-time
+          description: Filtrar por data final (<=)
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+          description: Ordenação por data de início
       responses:
         "200":
           description: Lista de transferências
           content:
             application/json:
               schema:
-                items:
-                  $ref: "#/components/schemas/models.TransferStatus"
-                type: array
+                $ref: "#/components/schemas/models.ApiResponseTransferStatusList"
       summary: Listar todas as transferências
       tags:
         - transfer
@@ -256,5 +277,35 @@ components:
           type: string
         status:
           example: in_progress
+          type: string
+      type: object
+    models.ApiResponseTransferResponse:
+      properties:
+        data:
+          $ref: '#/components/schemas/models.TransferResponse'
+        error:
+          type: string
+      type: object
+    models.ApiResponseTransferStatus:
+      properties:
+        data:
+          $ref: '#/components/schemas/models.TransferStatus'
+        error:
+          type: string
+      type: object
+    models.ApiResponseTransferStatusList:
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/models.TransferStatus'
+        error:
+          type: string
+      type: object
+    models.ApiResponseHealthResponse:
+      properties:
+        data:
+          $ref: '#/components/schemas/models.HealthResponse'
+        error:
           type: string
       type: object

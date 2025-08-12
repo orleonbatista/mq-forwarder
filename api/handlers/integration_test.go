@@ -36,8 +36,11 @@ func TestIntegrationSQLite(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", w.Code)
 	}
+	var apiResp models.APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &apiResp)
+	data, _ := json.Marshal(apiResp.Data)
 	var resp models.TransferResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(data, &resp)
 
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)

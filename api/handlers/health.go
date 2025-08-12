@@ -35,5 +35,5 @@ func HealthCheck(c *gin.Context) {
 			resp.Database = "ok"
 		}
 	}
-	c.JSON(status, resp)
+	c.JSON(status, models.APIResponse{Data: resp})
 }

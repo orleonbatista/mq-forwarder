@@ -178,9 +178,14 @@ func TestDynamoStore(t *testing.T) {
 	if got.Status != "completed" || got.Error != msg {
 		t.Fatalf("status wrong: %+v", got)
 	}
-	list, err := store.List(0, 10)
+	list, err := store.List(transferstore.ListParams{Limit: 10})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v %v", len(list), err)
+	}
+	// filtering by status
+	filtered, err := store.List(transferstore.ListParams{Status: "completed"})
+	if err != nil || len(filtered) != 1 {
+		t.Fatalf("filter status failed: %v %v", filtered, err)
 	}
 	if err := store.Ping(); err != nil {
 		t.Fatalf("ping: %v", err)
@@ -211,7 +216,7 @@ func TestDynamoStoreErrors(t *testing.T) {
 	if err := store.UpdateProgress("1", 1, 1); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := store.List(0, 10); err == nil {
+	if _, err := store.List(transferstore.ListParams{Limit: 10}); err == nil {
 		t.Fatal("expected error")
 	}
 	if err := store.Ping(); err == nil {

@@ -36,10 +36,7 @@ var monitorInterval = time.Second
 func parseTransferRequest(c *gin.Context) (models.TransferRequest, bool) {
 	var req models.TransferRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.TransferResponse{
-			Status: transfer.StatusFailed,
-			Error:  "Erro ao processar requisição: " + err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Error: "Erro ao processar requisição: " + err.Error()})
 		return models.TransferRequest{}, false
 	}
 	return req, true
@@ -178,7 +175,7 @@ func (h *TransferHandler) StartTransfer(c *gin.Context) {
 		},
 	}
 	if err := h.store.Create(tr); err != nil {
-		c.JSON(http.StatusInternalServerError, models.TransferResponse{Status: transfer.StatusFailed, Error: "erro ao persistir"})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Error: "erro ao persistir"})
 		return
 	}
 
@@ -187,10 +184,10 @@ func (h *TransferHandler) StartTransfer(c *gin.Context) {
 	h.wg.Add(1)
 	go h.monitorTransfer(requestID, transferMgr)
 
-	c.JSON(http.StatusAccepted, models.TransferResponse{
+	c.JSON(http.StatusAccepted, models.APIResponse{Data: models.TransferResponse{
 		RequestID: requestID,
 		Status:    transfer.StatusInProgress,
-	})
+	}})
 }
 
 func (h *TransferHandler) monitorTransfer(requestID string, transferMgr *transfer.TransferManager) {
@@ -231,14 +228,14 @@ func (h *TransferHandler) GetTransferStatus(c *gin.Context) {
 	req, err := h.store.GetByID(requestID)
 	if err != nil {
 		if isNotFound(err) {
-			c.JSON(http.StatusNotFound, models.TransferResponse{Status: transfer.StatusFailed, Error: "Transferência não encontrada"})
+			c.JSON(http.StatusNotFound, models.APIResponse{Error: "Transferência não encontrada"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, models.TransferResponse{Status: transfer.StatusFailed, Error: "erro ao consultar"})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Error: "erro ao consultar"})
 		return
 	}
 
-	c.JSON(http.StatusOK, toStatus(req))
+	c.JSON(http.StatusOK, models.APIResponse{Data: toStatus(req)})
 }
 
 // @Summary Listar todas as transferências
@@ -248,28 +245,43 @@ func (h *TransferHandler) GetTransferStatus(c *gin.Context) {
 // @Success 200 {array} models.TransferStatus "Lista de transferências"
 // @Router /api/v1/transfers [get]
 func (h *TransferHandler) ListTransfers(c *gin.Context) {
-	limit := 100
+	params := transferstore.ListParams{Limit: 100}
 	if lStr := c.Query("limit"); lStr != "" {
 		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-			limit = l
+			params.Limit = l
 		}
 	}
-	offset := 0
 	if oStr := c.Query("offset"); oStr != "" {
 		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
-			offset = o
+			params.Offset = o
 		}
 	}
-	reqs, err := h.store.List(offset, limit)
+	if status := c.Query("status"); status != "" {
+		params.Status = status
+	}
+	if startStr := c.Query("start"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			params.StartTime = &t
+		}
+	}
+	if endStr := c.Query("end"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+			params.EndTime = &t
+		}
+	}
+	if order := c.Query("order"); order != "" {
+		params.Order = order
+	}
+	reqs, err := h.store.List(params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.TransferResponse{Status: transfer.StatusFailed, Error: "erro ao listar"})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Error: "erro ao listar"})
 		return
 	}
 	statuses := make([]models.TransferStatus, 0, len(reqs))
 	for _, r := range reqs {
 		statuses = append(statuses, toStatus(r))
 	}
-	c.JSON(http.StatusOK, statuses)
+	c.JSON(http.StatusOK, models.APIResponse{Data: statuses})
 }
 
 // @Summary Cancelar uma transferência em andamento
@@ -287,15 +299,15 @@ func (h *TransferHandler) CancelTransfer(c *gin.Context) {
 	req, err := h.store.GetByID(requestID)
 	if err != nil {
 		if isNotFound(err) {
-			c.JSON(http.StatusNotFound, models.TransferResponse{Status: transfer.StatusFailed, Error: "Transferência não encontrada"})
+			c.JSON(http.StatusNotFound, models.APIResponse{Error: "Transferência não encontrada"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, models.TransferResponse{Status: transfer.StatusFailed, Error: "erro ao consultar"})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Error: "erro ao consultar"})
 		return
 	}
 
 	if req.Status != transfer.StatusInProgress {
-		c.JSON(http.StatusBadRequest, models.TransferResponse{Status: transfer.StatusFailed, Error: "Transferência já concluída ou falhou", RequestID: requestID})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Error: "Transferência já concluída ou falhou"})
 		return
 	}
 
@@ -305,11 +317,11 @@ func (h *TransferHandler) CancelTransfer(c *gin.Context) {
 	}
 	now := time.Now().UTC()
 	if err := h.store.UpdateStatus(requestID, transfer.StatusCancelled, &now, nil); err != nil {
-		c.JSON(http.StatusInternalServerError, models.TransferResponse{Status: transfer.StatusFailed, Error: "erro ao cancelar"})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Error: "erro ao cancelar"})
 		return
 	}
 
 	h.managers.Delete(requestID)
 
-	c.JSON(http.StatusOK, models.TransferResponse{Status: transfer.StatusCancelled, RequestID: requestID})
+	c.JSON(http.StatusOK, models.APIResponse{Data: models.TransferResponse{Status: transfer.StatusCancelled, RequestID: requestID}})
 }

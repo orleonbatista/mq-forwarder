@@ -97,14 +97,28 @@ func (s *SQLiteStore) UpdateProgress(id string, messagesTransferred int, bytesTr
 		}).Error
 }
 
-func (s *SQLiteStore) List(offset, limit int) ([]transferstore.TransferRequest, error) {
+func (s *SQLiteStore) List(params transferstore.ListParams) ([]transferstore.TransferRequest, error) {
 	var models []transferRequestModel
 	q := s.db
-	if offset > 0 {
-		q = q.Offset(offset)
+	if params.Status != "" {
+		q = q.Where("status = ?", params.Status)
 	}
-	if limit > 0 {
-		q = q.Limit(limit)
+	if params.StartTime != nil {
+		q = q.Where("start_time >= ?", *params.StartTime)
+	}
+	if params.EndTime != nil {
+		q = q.Where("start_time <= ?", *params.EndTime)
+	}
+	order := "start_time desc"
+	if params.Order == "asc" {
+		order = "start_time asc"
+	}
+	q = q.Order(order)
+	if params.Offset > 0 {
+		q = q.Offset(params.Offset)
+	}
+	if params.Limit > 0 {
+		q = q.Limit(params.Limit)
 	}
 	if err := q.Find(&models).Error; err != nil {
 		return nil, err

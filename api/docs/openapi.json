@@ -1,392 +1,474 @@
 {
-    "openapi": "3.0.0",
-    "info": {
-        "description": "API para transferência de mensagens entre filas IBM MQ",
-        "title": "MQ Transfer API",
-        "termsOfService": "http://swagger.io/terms/",
-        "contact": {
-            "name": "API Support",
-            "url": "http://www.example.com/support",
-            "email": "support@example.com"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
-        "version": "1.0"
+  "openapi": "3.0.0",
+  "info": {
+    "contact": {
+      "email": "support@example.com",
+      "name": "API Support",
+      "url": "http://www.example.com/support"
     },
-    "paths": {
-        "/api/v1/health": {
-            "get": {
-                "description": "Retorna informacoes de saude da aplicacao",
-                "tags": [
-                    "health"
-                ],
-                "summary": "Health Check",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.HealthResponse"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/transfer": {
-            "post": {
-                "description": "Inicia uma transferência de mensagens de uma fila MQ para outra",
-                "tags": [
-                    "transfer"
-                ],
-                "summary": "Iniciar transferência de mensagens MQ",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/models.TransferRequest"
-                            }
-                        }
-                    },
-                    "description": "Detalhes da transferência",
-                    "required": true
-                },
-                "responses": {
-                    "202": {
-                        "description": "Transferência iniciada",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Erro na requisição",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Erro interno",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/transfer/{requestId}": {
-            "get": {
-                "description": "Retorna o status atual de uma transferência de mensagens",
-                "tags": [
-                    "transfer"
-                ],
-                "summary": "Obter status da transferência",
-                "parameters": [
-                    {
-                        "description": "ID da requisição de transferência",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Status da transferência",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferStatus"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Transferência não encontrada",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/transfer/{requestId}/cancel": {
-            "post": {
-                "description": "Cancela uma transferência de mensagens que está em andamento",
-                "tags": [
-                    "transfer"
-                ],
-                "summary": "Cancelar uma transferência em andamento",
-                "parameters": [
-                    {
-                        "description": "ID da requisição de transferência",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Transferência cancelada",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Transferência já concluída",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Transferência não encontrada",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/models.TransferResponse"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/transfers": {
-            "get": {
-                "description": "Retorna uma lista com todas as transferências e seus status",
-                "tags": [
-                    "transfer"
-                ],
-                "summary": "Listar todas as transferências",
-                "parameters": [
-                    {
-                        "in": "query",
-                        "name": "limit",
-                        "schema": {
-                            "type": "integer",
-                            "default": 100,
-                            "minimum": 1
-                        },
-                        "description": "Número máximo de registros a retornar"
-                    },
-                    {
-                        "in": "query",
-                        "name": "offset",
-                        "schema": {
-                            "type": "integer",
-                            "default": 0,
-                            "minimum": 0
-                        },
-                        "description": "Quantidade de registros a pular antes de iniciar a lista"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Lista de transferências",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "array",
-                                    "items": {
-                                        "$ref": "#/components/schemas/models.TransferStatus"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    "description": "API para transferência de mensagens entre filas IBM MQ",
+    "license": {
+      "name": "Apache 2.0",
+      "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "servers": [
-        {
-            "url": "/"
-        }
-    ],
-    "components": {
-        "schemas": {
-            "models.ConnectionDetails": {
-                "type": "object",
-                "required": [
-                    "channel",
-                    "connectionName",
-                    "queueManagerName"
-                ],
-                "properties": {
-                    "channel": {
-                        "type": "string",
-                        "example": "SYSTEM.DEF.SVRCONN"
-                    },
-                    "connectionName": {
-                        "type": "string",
-                        "example": "localhost(1414)"
-                    },
-                    "password": {
-                        "type": "string",
-                        "example": "mqpassword"
-                    },
-                    "queueManagerName": {
-                        "type": "string",
-                        "example": "QM1"
-                    },
-                    "username": {
-                        "type": "string",
-                        "example": "mquser"
-                    }
+    "termsOfService": "http://swagger.io/terms/",
+    "title": "MQ Transfer API",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "description": "Retorna informacoes de saude da aplicacao",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseHealthResponse"
                 }
-            },
-            "models.HealthResponse": {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "example": "ok"
-                    },
-                    "version": {
-                        "type": "string",
-                        "example": "1.0.0"
-                    },
-                    "timestamp": {
-                        "type": "string",
-                        "example": "2025-06-04T00:15:30Z"
-                    },
-                    "database": {
-                        "type": "string",
-                        "example": "ok"
-                    }
-                }
-            },
-            "models.TransferRequest": {
-                "type": "object",
-                "required": [
-                    "destination",
-                    "destinationQueue",
-                    "source",
-                    "sourceQueue"
-                ],
-                "properties": {
-                    "bufferSize": {
-                        "type": "integer",
-                        "example": 1048576
-                    },
-                    "commitInterval": {
-                        "type": "integer",
-                        "example": 10
-                    },
-                    "destination": {
-                        "$ref": "#/components/schemas/models.ConnectionDetails"
-                    },
-                    "destinationQueue": {
-                        "type": "string",
-                        "example": "DEST.QUEUE"
-                    },
-                    "nonSharedConnection": {
-                        "type": "boolean",
-                        "example": false
-                    },
-                    "source": {
-                        "$ref": "#/components/schemas/models.ConnectionDetails"
-                    },
-                    "sourceQueue": {
-                        "type": "string",
-                        "example": "SOURCE.QUEUE"
-                    }
-                }
-            },
-            "models.TransferResponse": {
-                "type": "object",
-                "properties": {
-                    "error": {
-                        "type": "string",
-                        "example": "Failed to connect to source queue manager"
-                    },
-                    "messagesTotal": {
-                        "type": "integer",
-                        "example": 1000
-                    },
-                    "messagesTransferred": {
-                        "type": "integer",
-                        "example": 500
-                    },
-                    "requestId": {
-                        "type": "string",
-                        "example": "550e8400-e29b-41d4-a716-446655440000"
-                    },
-                    "status": {
-                        "type": "string",
-                        "example": "in_progress"
-                    }
-                }
-            },
-            "models.TransferStatus": {
-                "type": "object",
-                "properties": {
-                    "bytesTransferred": {
-                        "type": "integer",
-                        "example": 1048576
-                    },
-                    "endTime": {
-                        "type": "string",
-                        "example": "2025-06-04T00:16:45Z"
-                    },
-                    "error": {
-                        "type": "string",
-                        "example": "Failed to connect to source queue manager"
-                    },
-                    "messagesTotal": {
-                        "type": "integer",
-                        "example": 1000
-                    },
-                    "messagesTransferred": {
-                        "type": "integer",
-                        "example": 500
-                    },
-                    "requestId": {
-                        "type": "string",
-                        "example": "550e8400-e29b-41d4-a716-446655440000"
-                    },
-                    "startTime": {
-                        "type": "string",
-                        "example": "2025-06-04T00:15:30Z"
-                    },
-                    "status": {
-                        "type": "string",
-                        "example": "in_progress"
-                    }
-                }
+              }
             }
-        }
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/transfer": {
+      "post": {
+        "description": "Inicia uma transferência de mensagens de uma fila MQ para outra",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/models.TransferRequest"
+              }
+            }
+          },
+          "description": "Detalhes da transferência",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Transferência iniciada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Erro na requisição",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Iniciar transferência de mensagens MQ",
+        "tags": [
+          "transfer"
+        ]
+      }
+    },
+    "/api/v1/transfer/{requestId}": {
+      "get": {
+        "description": "Retorna o status atual de uma transferência de mensagens",
+        "parameters": [
+          {
+            "description": "ID da requisição de transferência",
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status da transferência",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transferência não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Obter status da transferência",
+        "tags": [
+          "transfer"
+        ]
+      }
+    },
+    "/api/v1/transfer/{requestId}/cancel": {
+      "post": {
+        "description": "Cancela uma transferência de mensagens que está em andamento",
+        "parameters": [
+          {
+            "description": "ID da requisição de transferência",
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transferência cancelada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Transferência já concluída",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transferência não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Cancelar uma transferência em andamento",
+        "tags": [
+          "transfer"
+        ]
+      }
+    },
+    "/api/v1/transfers": {
+      "get": {
+        "description": "Retorna uma lista com todas as transferências e seus status",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1
+            },
+            "description": "Número máximo de registros a retornar"
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            },
+            "description": "Quantidade de registros a pular antes de iniciar a lista"
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filtrar pelo status da transferência"
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Filtrar por data inicial (>=)"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Filtrar por data final (<=)"
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "description": "Ordenação por data de início"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de transferências",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/models.ApiResponseTransferStatusList"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Listar todas as transferências",
+        "tags": [
+          "transfer"
+        ]
+      }
     }
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "models.ConnectionDetails": {
+        "properties": {
+          "channel": {
+            "example": "SYSTEM.DEF.SVRCONN",
+            "type": "string"
+          },
+          "connectionName": {
+            "example": "localhost(1414)",
+            "type": "string"
+          },
+          "password": {
+            "example": "mqpassword",
+            "type": "string"
+          },
+          "queueManagerName": {
+            "example": "QM1",
+            "type": "string"
+          },
+          "username": {
+            "example": "mquser",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "connectionName",
+          "queueManagerName"
+        ],
+        "type": "object"
+      },
+      "models.HealthResponse": {
+        "properties": {
+          "status": {
+            "example": "ok",
+            "type": "string"
+          },
+          "version": {
+            "example": "1.0.0",
+            "type": "string"
+          },
+          "timestamp": {
+            "example": "2025-06-04T00:15:30Z",
+            "type": "string"
+          },
+          "database": {
+            "example": "ok",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "models.TransferRequest": {
+        "properties": {
+          "bufferSize": {
+            "example": 1048576,
+            "type": "integer"
+          },
+          "commitInterval": {
+            "example": 10,
+            "type": "integer"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/models.ConnectionDetails"
+          },
+          "destinationQueue": {
+            "example": "DEST.QUEUE",
+            "type": "string"
+          },
+          "nonSharedConnection": {
+            "example": false,
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/models.ConnectionDetails"
+          },
+          "sourceQueue": {
+            "example": "SOURCE.QUEUE",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination",
+          "destinationQueue",
+          "source",
+          "sourceQueue"
+        ],
+        "type": "object"
+      },
+      "models.TransferResponse": {
+        "properties": {
+          "error": {
+            "example": "Failed to connect to source queue manager",
+            "type": "string"
+          },
+          "messagesTotal": {
+            "example": 1000,
+            "type": "integer"
+          },
+          "messagesTransferred": {
+            "example": 500,
+            "type": "integer"
+          },
+          "requestId": {
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "type": "string"
+          },
+          "status": {
+            "example": "in_progress",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "models.TransferStatus": {
+        "properties": {
+          "bytesTransferred": {
+            "example": 1048576,
+            "type": "integer"
+          },
+          "endTime": {
+            "example": "2025-06-04T00:16:45Z",
+            "type": "string"
+          },
+          "error": {
+            "example": "Failed to connect to source queue manager",
+            "type": "string"
+          },
+          "messagesTotal": {
+            "example": 1000,
+            "type": "integer"
+          },
+          "messagesTransferred": {
+            "example": 500,
+            "type": "integer"
+          },
+          "requestId": {
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "type": "string"
+          },
+          "startTime": {
+            "example": "2025-06-04T00:15:30Z",
+            "type": "string"
+          },
+          "status": {
+            "example": "in_progress",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "models.ApiResponseTransferResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/models.TransferResponse"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "models.ApiResponseTransferStatus": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/models.TransferStatus"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "models.ApiResponseTransferStatusList": {
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/models.TransferStatus"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "models.ApiResponseHealthResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/models.HealthResponse"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
 }
