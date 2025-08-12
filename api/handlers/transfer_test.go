@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -40,6 +41,29 @@ func TestStartTransferInvalid(t *testing.T) {
 	}
 }
 
+func TestStartTransferStoreError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, store, ctrl := newMockHandler(t)
+	defer ctrl.Finish()
+
+	req := models.TransferRequest{
+		Source:           models.ConnectionDetails{QueueManagerName: "qm1", ConnectionName: "c", Channel: "ch"},
+		SourceQueue:      "SQ",
+		Destination:      models.ConnectionDetails{QueueManagerName: "qm2", ConnectionName: "c", Channel: "ch"},
+		DestinationQueue: "DQ",
+	}
+	body, _ := json.Marshal(req)
+	store.EXPECT().Create(gomock.Any()).Return(errors.New("fail"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/transfer", bytes.NewBuffer(body))
+	h.StartTransfer(c)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
 func TestGetStatusNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h, store, ctrl := newMockHandler(t)
@@ -52,6 +76,21 @@ func TestGetStatusNotFound(t *testing.T) {
 	h.GetTransferStatus(c)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404")
+	}
+}
+
+func TestGetStatusError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, store, ctrl := newMockHandler(t)
+	defer ctrl.Finish()
+	store.EXPECT().GetByID("na").Return(transferstore.TransferRequest{}, errors.New("boom"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{gin.Param{Key: "requestId", Value: "na"}}
+	h.GetTransferStatus(c)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500")
 	}
 }
 
@@ -76,8 +115,11 @@ func TestStartAndCancelTransfer(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", w.Code)
 	}
+	var apiResp models.APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &apiResp)
+	dataBytes, _ := json.Marshal(apiResp.Data)
 	var resp models.TransferResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(dataBytes, &resp)
 
 	store.EXPECT().GetByID(resp.RequestID).Return(transferstore.TransferRequest{RequestID: resp.RequestID, Status: transfer.StatusInProgress}, nil)
 	store.EXPECT().UpdateStatus(resp.RequestID, transfer.StatusCancelled, gomock.Any(), gomock.Nil()).AnyTimes()
@@ -112,7 +154,7 @@ func TestListTransfers(t *testing.T) {
 	h, store, ctrl := newMockHandler(t)
 	defer ctrl.Finish()
 	list := []transferstore.TransferRequest{{RequestID: "a"}, {RequestID: "b"}}
-	store.EXPECT().List(0, 100).Return(list, nil)
+	store.EXPECT().List(transferstore.ListParams{Limit: 100}).Return(list, nil)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -121,9 +163,12 @@ func TestListTransfers(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("unexpected status")
 	}
-	var out []models.TransferStatus
+	var out models.APIResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &out)
-	if len(out) != 2 {
+	data, _ := json.Marshal(out.Data)
+	var statuses []models.TransferStatus
+	_ = json.Unmarshal(data, &statuses)
+	if len(statuses) != 2 {
 		t.Fatalf("expected 2 entries")
 	}
 }
@@ -133,18 +178,24 @@ func TestListTransfersWithParams(t *testing.T) {
 	h, store, ctrl := newMockHandler(t)
 	defer ctrl.Finish()
 	list := []transferstore.TransferRequest{{RequestID: "c"}}
-	store.EXPECT().List(5, 1).Return(list, nil)
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	params := transferstore.ListParams{Offset: 5, Limit: 1, Status: "completed", StartTime: &start, EndTime: &end, Order: "asc"}
+	store.EXPECT().List(params).Return(list, nil)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/?limit=1&offset=5", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?limit=1&offset=5&status=completed&start="+start.Format(time.RFC3339)+"&end="+end.Format(time.RFC3339)+"&order=asc", nil)
 	h.ListTransfers(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("unexpected status")
 	}
-	var out []models.TransferStatus
-	_ = json.Unmarshal(w.Body.Bytes(), &out)
-	if len(out) != 1 || out[0].RequestID != "c" {
+	var out2 models.APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &out2)
+	data2, _ := json.Marshal(out2.Data)
+	var statuses2 []models.TransferStatus
+	_ = json.Unmarshal(data2, &statuses2)
+	if len(statuses2) != 1 || statuses2[0].RequestID != "c" {
 		t.Fatalf("expected filtered result")
 	}
 }

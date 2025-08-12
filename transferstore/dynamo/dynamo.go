@@ -2,6 +2,7 @@ package dynamo
 
 import (
 	"errors"
+	"sort"
 	"time"
 
 	dynamolib "github.com/guregu/dynamo"
@@ -95,27 +96,45 @@ func (d *DynamoStore) UpdateProgress(id string, messagesTransferred int, bytesTr
 		Run()
 }
 
-func (d *DynamoStore) List(offset, limit int) ([]transferstore.TransferRequest, error) {
+func (d *DynamoStore) List(params transferstore.ListParams) ([]transferstore.TransferRequest, error) {
 	if d.closed {
 		return nil, errors.New("store closed")
 	}
 	var reqs []transferstore.TransferRequest
 	scan := d.table.Scan()
-	if limit > 0 {
-		// fetch enough items to satisfy offset + limit
-		scan = scan.Limit(int64(offset + limit))
+	if params.Limit > 0 {
+		scan = scan.Limit(int64(params.Offset + params.Limit))
 	}
 	if err := scan.All(&reqs); err != nil {
 		return nil, err
 	}
-	if offset >= len(reqs) {
+	filtered := make([]transferstore.TransferRequest, 0, len(reqs))
+	for _, r := range reqs {
+		if params.Status != "" && r.Status != params.Status {
+			continue
+		}
+		if params.StartTime != nil && r.StartTime.Before(*params.StartTime) {
+			continue
+		}
+		if params.EndTime != nil && r.StartTime.After(*params.EndTime) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if params.Order == "asc" {
+			return filtered[i].StartTime.Before(filtered[j].StartTime)
+		}
+		return filtered[i].StartTime.After(filtered[j].StartTime)
+	})
+	if params.Offset >= len(filtered) {
 		return []transferstore.TransferRequest{}, nil
 	}
-	end := len(reqs)
-	if limit > 0 && offset+limit < end {
-		end = offset + limit
+	end := len(filtered)
+	if params.Limit > 0 && params.Offset+params.Limit < end {
+		end = params.Offset + params.Limit
 	}
-	return reqs[offset:end], nil
+	return filtered[params.Offset:end], nil
 }
 
 func (d *DynamoStore) Ping() error {

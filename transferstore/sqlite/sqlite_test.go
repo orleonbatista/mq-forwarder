@@ -51,9 +51,40 @@ func TestSQLiteStore(t *testing.T) {
 	if fetched.Status != "completed" || fetched.Error != errMsg {
 		t.Fatalf("status not updated: %+v", fetched)
 	}
-	list, err := store.List(0, 10)
+	list, err := store.List(transferstore.ListParams{Limit: 10})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list failed: %v %v", len(list), err)
+	}
+
+	// create another record to test filtering
+	req2 := transferstore.TransferRequest{
+		RequestID:             "2",
+		Status:                "failed",
+		StartTime:             now.Add(time.Hour),
+		SourceQueue:           "SRC",
+		DestinationQueue:      "DST",
+		SourceConnection:      transferstore.ConnectionDetails{QueueManagerName: "QM1"},
+		DestinationConnection: transferstore.ConnectionDetails{QueueManagerName: "QM2"},
+	}
+	if err := store.Create(req2); err != nil {
+		t.Fatalf("create2: %v", err)
+	}
+	// filter by status
+	filtered, err := store.List(transferstore.ListParams{Status: "failed"})
+	if err != nil || len(filtered) != 1 || filtered[0].RequestID != "2" {
+		t.Fatalf("status filter failed: %v %v", filtered, err)
+	}
+	// filter by time range
+	start := now.Add(time.Minute)
+	end2 := now.Add(2 * time.Hour)
+	rangeFiltered, err := store.List(transferstore.ListParams{StartTime: &start, EndTime: &end2})
+	if err != nil || len(rangeFiltered) != 1 || rangeFiltered[0].RequestID != "2" {
+		t.Fatalf("time range filter failed: %v %v", rangeFiltered, err)
+	}
+	// order descending
+	ordered, err := store.List(transferstore.ListParams{Order: "asc"})
+	if err != nil || len(ordered) != 2 || ordered[0].RequestID != "1" {
+		t.Fatalf("order failed: %v %v", ordered, err)
 	}
 	if _, err := store.GetByID("missing"); err == nil {
 		t.Fatalf("expected not found")

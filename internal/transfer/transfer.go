@@ -152,37 +152,13 @@ func (tm *TransferManager) run(parent context.Context) {
 
 func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, resultCh chan<- workerResult) {
 	defer wg.Done()
-
-	srcConn := mqutils.NewMQConnection(tm.opts.SourceConfig)
-	if err := srcConn.Connect(); err != nil {
-		resultCh <- workerResult{err: err}
-		cancel()
+	srcConn, destConn, srcQ, destQ, err := tm.initConnections(cancel, resultCh)
+	if err != nil {
 		return
 	}
 	defer srcConn.Disconnect()
-
-	destConn := mqutils.NewMQConnection(tm.opts.DestConfig)
-	if err := destConn.Connect(); err != nil {
-		resultCh <- workerResult{err: err}
-		cancel()
-		return
-	}
 	defer destConn.Disconnect()
-
-	destQ, err := destConn.OpenQueue(tm.opts.DestQueue, false, false)
-	if err != nil {
-		resultCh <- workerResult{err: err}
-		cancel()
-		return
-	}
 	defer destConn.CloseQueue(destQ)
-
-	srcQ, err := srcConn.OpenQueue(tm.opts.SourceQueue, true, tm.opts.NonSharedConnection)
-	if err != nil {
-		resultCh <- workerResult{err: err}
-		cancel()
-		return
-	}
 	defer srcConn.CloseQueue(srcQ)
 	buffer := make([]byte, tm.opts.BufferSize)
 	idle := 0
@@ -207,26 +183,64 @@ func (tm *TransferManager) worker(ctx context.Context, cancel context.CancelFunc
 		}
 		idle = 0
 
-		bufCopy := tm.copyBuffer(data)
-
-		if err := destConn.PutMessage(destQ, bufCopy, md, "set"); err != nil {
-			_ = srcConn.Backout()
-			_ = destConn.Backout()
-			tm.bufferPool.Put(bufCopy[:cap(bufCopy)])
-			resultCh <- workerResult{err: err}
-			cancel()
+		if err := tm.handleMessage(destConn, destQ, srcConn, data, md, &commitCounter, resultCh, cancel); err != nil {
 			return
 		}
-		tm.bufferPool.Put(bufCopy[:cap(bufCopy)])
-
-		commitCounter++
-		atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
-		atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(data)))
-
-		if tm.commitIfNeeded(&commitCounter, destConn, srcConn, resultCh, cancel) {
-			continue
-		}
 	}
+}
+
+func (tm *TransferManager) initConnections(cancel context.CancelFunc, resultCh chan<- workerResult) (*mqutils.MQConnection, *mqutils.MQConnection, struct{}, struct{}, error) {
+	srcConn := mqutils.NewMQConnection(tm.opts.SourceConfig)
+	if err := srcConn.Connect(); err != nil {
+		resultCh <- workerResult{err: err}
+		cancel()
+		return nil, nil, struct{}{}, struct{}{}, err
+	}
+	destConn := mqutils.NewMQConnection(tm.opts.DestConfig)
+	if err := destConn.Connect(); err != nil {
+		resultCh <- workerResult{err: err}
+		cancel()
+		srcConn.Disconnect()
+		return nil, nil, struct{}{}, struct{}{}, err
+	}
+	destQ, err := destConn.OpenQueue(tm.opts.DestQueue, false, false)
+	if err != nil {
+		resultCh <- workerResult{err: err}
+		cancel()
+		destConn.Disconnect()
+		srcConn.Disconnect()
+		return nil, nil, struct{}{}, struct{}{}, err
+	}
+	srcQ, err := srcConn.OpenQueue(tm.opts.SourceQueue, true, tm.opts.NonSharedConnection)
+	if err != nil {
+		resultCh <- workerResult{err: err}
+		cancel()
+		destConn.CloseQueue(destQ)
+		destConn.Disconnect()
+		srcConn.Disconnect()
+		return nil, nil, struct{}{}, struct{}{}, err
+	}
+	return srcConn, destConn, srcQ, destQ, nil
+}
+
+func (tm *TransferManager) handleMessage(destConn *mqutils.MQConnection, destQ struct{}, srcConn *mqutils.MQConnection, data []byte, md interface{}, commitCounter *int, resultCh chan<- workerResult, cancel context.CancelFunc) error {
+	bufCopy := tm.copyBuffer(data)
+	if err := destConn.PutMessage(destQ, bufCopy, md, "set"); err != nil {
+		_ = srcConn.Backout()
+		_ = destConn.Backout()
+		tm.bufferPool.Put(bufCopy[:cap(bufCopy)])
+		resultCh <- workerResult{err: err}
+		cancel()
+		return err
+	}
+	tm.bufferPool.Put(bufCopy[:cap(bufCopy)])
+	*commitCounter++
+	atomic.AddInt64(&tm.stats.MessagesTransferred, 1)
+	atomic.AddInt64(&tm.stats.BytesTransferred, int64(len(data)))
+	if tm.commitIfNeeded(commitCounter, destConn, srcConn, resultCh, cancel) {
+		// commitIfNeeded already handled error if any
+	}
+	return nil
 }
 
 func (tm *TransferManager) handleContextDone(ctx context.Context, commitCounter int, destConn, srcConn *mqutils.MQConnection, resultCh chan<- workerResult) bool {
