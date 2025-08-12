@@ -73,6 +73,7 @@ func TestGetStatusNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{gin.Param{Key: "requestId", Value: "na"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/transfer/na", nil)
 	h.GetTransferStatus(c)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404")
@@ -88,6 +89,7 @@ func TestGetStatusError(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{gin.Param{Key: "requestId", Value: "na"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/transfer/na", nil)
 	h.GetTransferStatus(c)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500")
@@ -126,6 +128,7 @@ func TestStartAndCancelTransfer(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Params = gin.Params{gin.Param{Key: "requestId", Value: resp.RequestID}}
+	c2.Request = httptest.NewRequest(http.MethodPost, "/transfer/"+resp.RequestID+"/cancel", nil)
 	h.CancelTransfer(c2)
 	if w2.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w2.Code)
@@ -143,6 +146,7 @@ func TestCancelCompleted(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{gin.Param{Key: "requestId", Value: "1"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/transfer/1/cancel", nil)
 	h.CancelTransfer(c)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400")

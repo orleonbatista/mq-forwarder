@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,8 +15,6 @@ import (
 	"github.com/guregu/dynamo"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	ddgin "gopkg.in/DataDog/dd-trace-go.v1/contrib/gin-gonic/gin"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	docs "mq-forwarder-go/api/docs"
 	"mq-forwarder-go/api/handlers"
 	"mq-forwarder-go/transferstore"
@@ -44,18 +41,6 @@ var serverShutdown = func(srv *http.Server, ctx context.Context) error {
 // @BasePath /
 // @schemes http
 func main() {
-	opts := []tracer.StartOption{}
-	if _, ok := os.LookupEnv("DD_SERVICE"); !ok {
-		opts = append(opts, tracer.WithServiceName("mq-forwarder-service"))
-	}
-	if _, ok := os.LookupEnv("DD_ENV"); !ok {
-		opts = append(opts, tracer.WithEnv("prod"))
-	}
-	if host, ok := os.LookupEnv("DD_AGENT_HOST"); ok {
-		opts = append(opts, tracer.WithAgentAddr(fmt.Sprintf("%s:8126", host)))
-	}
-	tracer.Start(opts...)
-	defer tracer.Stop()
 
 	var store transferstore.TransferStore
 	if os.Getenv("USE_DYNAMO") == "true" {
@@ -85,7 +70,6 @@ func main() {
 	defer stop()
 
 	r := gin.Default()
-	r.Use(ddgin.Middleware("mq-forwarder-service"))
 	// Use empty host so swagger calls the same host that served the docs
 	docs.OpenAPIInfo.Host = ""
 	v1 := r.Group("/api/v1")

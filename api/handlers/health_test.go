@@ -17,6 +17,7 @@ func TestHealthCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/health", nil)
 	HealthStore = pingStore{}
 	defer func() { HealthStore = nil }()
 
@@ -33,6 +34,7 @@ func TestHealthCheckFail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/health", nil)
 	HealthStore = pingStore{err: http.ErrServerClosed}
 	defer func() { HealthStore = nil }()
 

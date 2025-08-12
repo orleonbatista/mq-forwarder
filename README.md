@@ -1,6 +1,6 @@
 # MQ Forwarder
 
-Aplicação escrita em Go para transferir mensagens entre filas IBM MQ. Ela expõe uma API REST usando o framework Gin e está instrumentada com o APM do Datadog.
+Aplicação escrita em Go para transferir mensagens entre filas IBM MQ. Ela expõe uma API REST usando o framework Gin e está instrumentada automaticamente com o Datadog Orchestrion.
 
 Cada instância de worker abre conexões próprias com as filas de origem e destino, permitindo o processamento totalmente paralelo em máquinas multi-core.
 
@@ -91,7 +91,29 @@ Retorna o status de saúde e a versão atual da aplicação.
 
 ### Observabilidade com Datadog
 
-A aplicação envia traces para o Datadog APM, permitindo acompanhar o processamento das mensagens e identificar eventuais falhas.
+A aplicação utiliza o [Datadog Orchestrion](https://docs.datadoghq.com/tracing/trace_collection/automatic_instrumentation/dd_libraries/go/?tab=compiletimeinstrumentation) para adicionar instrumentação automática e enviar traces ao Datadog.
+
+#### Instalação e uso
+
+1. Instale o Orchestrion:
+
+```bash
+go install github.com/DataDog/orchestrion@latest
+```
+
+2. (Opcional) atualize as integrações detectadas:
+
+```bash
+orchestrion pin
+```
+
+3. Execute ou compile a aplicação usando o wrapper do Orchestrion:
+
+```bash
+orchestrion go run .
+# ou
+orchestrion go build
+```
 
 A documentação OpenAPI gerada automaticamente pode ser acessada em `/swagger/index.html` quando o servidor está em execução.
 

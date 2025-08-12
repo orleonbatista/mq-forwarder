@@ -44,6 +44,7 @@ func TestIntegrationSQLite(t *testing.T) {
 
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/transfer/"+resp.RequestID, nil)
 	c2.Params = gin.Params{gin.Param{Key: "requestId", Value: resp.RequestID}}
 	h.GetTransferStatus(c2)
 	if w2.Code != http.StatusOK {
@@ -52,6 +53,7 @@ func TestIntegrationSQLite(t *testing.T) {
 
 	w3 := httptest.NewRecorder()
 	c3, _ := gin.CreateTestContext(w3)
+	c3.Request = httptest.NewRequest(http.MethodGet, "/transfers", nil)
 	h.ListTransfers(c3)
 	if w3.Code != http.StatusOK {
 		t.Fatalf("list failed")
@@ -59,6 +61,7 @@ func TestIntegrationSQLite(t *testing.T) {
 
 	w4 := httptest.NewRecorder()
 	c4, _ := gin.CreateTestContext(w4)
+	c4.Request = httptest.NewRequest(http.MethodPost, "/transfer/"+resp.RequestID+"/cancel", nil)
 	c4.Params = gin.Params{gin.Param{Key: "requestId", Value: resp.RequestID}}
 	h.CancelTransfer(c4)
 	if w4.Code != http.StatusOK {
